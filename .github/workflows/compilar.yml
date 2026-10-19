@@ -17,17 +17,28 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extrair projeto v0.3.2
+      - name: Extrair projeto sem conflitos
         run: |
-          unzip -q AI_Player_Java_1.20.1_v0.3.2_dev_fontes.zip
+          mkdir -p fontes
+          unzip -q AI_Player_Java_1.20.1_v0.3.2_dev_fontes.zip -d fontes
 
       - name: Compilar Minecraft Fabric 1.20.1
-        working-directory: AI_Player_Java_1.20.1
-        run: bash gradlew clean build --no-daemon
+        shell: bash
+        run: |
+          set -e
+          WRAPPER="$(find fontes -type f -name gradlew -print -quit)"
+          if [ -z "$WRAPPER" ]; then
+            echo "ERRO: gradlew nao encontrado no ZIP."
+            exit 1
+          fi
+          cd "$(dirname "$WRAPPER")"
+          bash gradlew clean build --no-daemon
 
       - name: Disponibilizar JAR
         uses: actions/upload-artifact@v4
         with:
           name: AI-Player-v0.3.2-JAR
-          path: AI_Player_Java_1.20.1/build/libs/*.jar
+          path: |
+            fontes/**/build/libs/*.jar
+            !fontes/**/build/libs/*-sources.jar
           if-no-files-found: error
