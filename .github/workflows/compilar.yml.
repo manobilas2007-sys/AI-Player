@@ -1,0 +1,44 @@
+
+name: Compilar AI Player
+
+on: [push, workflow_dispatch]
+
+jobs:
+  compilar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Preparar Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Recuperar projeto do historico
+        run: |
+          curl -fL --retry 3 \
+            https://raw.githubusercontent.com/manobilas2007-sys/AI-Player/ed501c1f2154bd0b9b1f691b3890368767cdb96c/AI_Player_Java_1.20.1_v0.3.0_dev_fontes.zip \
+            -o projeto.zip
+          unzip -q projeto.zip
+
+      - name: Corrigir erro de sintaxe
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("AI_Player_Java_1.20.1/src/main/java/dev/aiplayer/ai/ResourceGathering.java")
+          s = p.read_text()
+          antigo = "for(int dz=-9;dz++)"
+          novo = "for(int dz=-9;dz<=9;dz++)"
+          assert antigo in s, "Trecho esperado nao encontrado"
+          p.write_text(s.replace(antigo, novo))
+          PY
+
+      - name: Compilar Fabric
+        working-directory: AI_Player_Java_1.20.1
+        run: bash gradlew build --no-daemon
+
+      - name: Disponibilizar JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Player-JAR
+          path: AI_Player_Java_1.20.1/build/libs/ai-player-0.3.0-dev.jar
+          if-no-files-found: error
