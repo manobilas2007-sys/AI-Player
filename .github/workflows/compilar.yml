@@ -1,5 +1,5 @@
 
-name: Compilar AI Player v0.3.2
+name: Compilar AI Player v0.3.3
 
 on: [push, workflow_dispatch]
 
@@ -17,28 +17,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extrair projeto sem conflitos
+      - name: Extrair projeto v0.3.3
         run: |
           mkdir -p fontes
-          unzip -q AI_Player_Java_1.20.1_v0.3.2_dev_fontes.zip -d fontes
+          unzip -q AI_Player_Java_1.20.1_v0.3.3_dev_fontes.zip -d fontes
 
       - name: Compilar Minecraft Fabric 1.20.1
-        shell: bash
-        run: |
-          set -e
-          WRAPPER="$(find fontes -type f -name gradlew -print -quit)"
-          if [ -z "$WRAPPER" ]; then
-            echo "ERRO: gradlew nao encontrado no ZIP."
-            exit 1
-          fi
-          cd "$(dirname "$WRAPPER")"
-          bash gradlew clean build --no-daemon
+        working-directory: fontes
+        run: bash gradlew clean build --no-daemon
 
       - name: Disponibilizar JAR
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Player-v0.3.2-JAR
-          path: |
-            fontes/**/build/libs/*.jar
-            !fontes/**/build/libs/*-sources.jar
+          name: AI-Player-v0.3.3-JAR
+          path: fontes/build/libs/ai-player-0.3.3-dev.jar
           if-no-files-found: error
