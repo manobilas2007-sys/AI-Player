@@ -42,15 +42,16 @@ jobs:
         working-directory: fontes
         run: bash gradlew clean build --no-daemon
 
+      
       - name: Preparar JAR
         run: |
           mkdir -p dist
           find fontes/build/libs -maxdepth 1 -name '*.jar' \
             ! -name '*-sources.jar' \
-            ! -name '*-dev.jar' \
             -exec cp {} dist/ \;
           ls -lh dist/
           test -n "$(ls -A dist)"
+
 
       - name: Disponibilizar JAR
         uses: actions/upload-artifact@v4
