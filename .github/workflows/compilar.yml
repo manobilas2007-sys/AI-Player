@@ -17,27 +17,38 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extrair projeto v0.3.4
+      - name: Extrair projeto
         run: |
           mkdir -p fontes
           unzip -q AI_Player_Java_1.20.1_v0.3.4_dev_fontes.zip -d fontes
 
-      - name: Compilar Minecraft Fabric 1.20.1
+      - name: Corrigir erro no TemporaryPillar
         run: |
-          set -e
-          WRAPPER="$(find fontes -type f -name gradlew -print -quit)"
-          if [ -z "$WRAPPER" ]; then
-            echo "ERRO: gradlew nao encontrado."
-            exit 1
-          fi
-          cd "$(dirname "$WRAPPER")"
-          bash gradlew clean build --no-daemon
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Preparar arquivo JAR
+          p = Path("fontes/src/main/java/dev/aiplayer/ai/TemporaryPillar.java")
+          s = p.read_text()
+
+          antigo = "if (!npc.isOnGround()) return deferCleanup(mining);"
+          novo = "if (!npc.isOnGround()) return false;"
+
+          assert s.count(antigo) == 2, "Codigo diferente do esperado"
+          p.write_text(s.replace(antigo, novo, 1))
+          print("Erro do TemporaryPillar corrigido!")
+          PY
+
+      - name: Compilar Minecraft Fabric 1.20.1
+        working-directory: fontes
+        run: bash gradlew clean build --no-daemon
+
+      - name: Preparar JAR
         run: |
           mkdir -p dist
-          find fontes -type f -path '*/build/libs/*.jar' \
-            ! -name '*-sources.jar' -exec cp {} dist/ \;
+          find fontes/build/libs -maxdepth 1 -name '*.jar' \
+            ! -name '*-sources.jar' \
+            ! -name '*-dev.jar' \
+            -exec cp {} dist/ \;
           ls -lh dist/
           test -n "$(ls -A dist)"
 
