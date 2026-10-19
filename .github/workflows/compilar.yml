@@ -1,9 +1,7 @@
 
-name: Compilar AI Player v0.3.1
+name: Compilar AI Player v0.3.2
 
-on:
-  push:
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
   compilar:
@@ -19,17 +17,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extrair projeto v0.3.1
+      - name: Extrair projeto v0.3.2
         run: |
-          unzip -q AI_Player_Java_1.20.1_v0.3.1_dev_fontes.zip
+          unzip -q AI_Player_Java_1.20.1_v0.3.2_dev_fontes.zip
 
-      - name: Compilar Fabric 1.20.1
+      - name: Compilar Minecraft Fabric 1.20.1
         working-directory: AI_Player_Java_1.20.1
         run: bash gradlew clean build --no-daemon
 
       - name: Disponibilizar JAR
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Player-v0.3.1-JAR
-          path: AI_Player_Java_1.20.1/build/libs/ai-player-0.3.1-dev.jar
+          name: AI-Player-v0.3.2-JAR
+          path: AI_Player_Java_1.20.1/build/libs/*.jar
           if-no-files-found: error
