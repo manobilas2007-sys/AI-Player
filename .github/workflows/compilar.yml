@@ -1,5 +1,5 @@
 
-name: Compilar AI Player v0.3.4
+name: Compilar AI Player v0.3.6
 
 on: [push, workflow_dispatch]
 
@@ -17,45 +17,39 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extrair projeto
+      - name: Extrair projeto v0.3.6
         run: |
           mkdir -p fontes
-          unzip -q AI_Player_Java_1.20.1_v0.3.4_dev_fontes.zip -d fontes
+          unzip -q AI_Player_Java_1.20.1_v0.3.6_dev_fontes.zip -d fontes
 
-      - name: Corrigir erro no TemporaryPillar
+      - name: Localizar projeto Gradle
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("fontes/src/main/java/dev/aiplayer/ai/TemporaryPillar.java")
-          s = p.read_text()
-
-          antigo = "if (!npc.isOnGround()) return deferCleanup(mining);"
-          novo = "if (!npc.isOnGround()) return false;"
-
-          assert s.count(antigo) == 2, "Codigo diferente do esperado"
-          p.write_text(s.replace(antigo, novo, 1))
-          print("Erro do TemporaryPillar corrigido!")
-          PY
+          WRAPPER="$(find fontes -type f -name gradlew -print -quit)"
+          if [ -z "$WRAPPER" ]; then
+            echo "ERRO: gradlew nao encontrado."
+            find fontes -maxdepth 3 -type f
+            exit 1
+          fi
+          echo "PROJECT_DIR=$(dirname "$WRAPPER")" >> "$GITHUB_ENV"
 
       - name: Compilar Minecraft Fabric 1.20.1
-        working-directory: fontes
-        run: bash gradlew clean build --no-daemon
+        run: |
+          cd "$PROJECT_DIR"
+          bash gradlew clean build --no-daemon
 
-      
       - name: Preparar JAR
         run: |
           mkdir -p dist
-          find fontes/build/libs -maxdepth 1 -name '*.jar' \
+          find "$PROJECT_DIR/build/libs" -maxdepth 1 \
+            -type f -name '*.jar' \
             ! -name '*-sources.jar' \
             -exec cp {} dist/ \;
           ls -lh dist/
           test -n "$(ls -A dist)"
 
-
       - name: Disponibilizar JAR
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Player-v0.3.4-JAR
+          name: AI-Player-v0.3.6-JAR
           path: dist/*.jar
           if-no-files-found: error
