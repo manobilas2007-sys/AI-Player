@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "aiplayer",
+  "version": "${version}",
+  "name": "AI Player",
+  "description": "Companheiro humanoide com inventário, proprietário e combate.",
+  "authors": [
+    "Luis"
+  ],
+  "environment": "*",
+  "license": "All-Rights-Reserved",
+  "entrypoints": {
+    "main": [
+      "dev.aiplayer.AIPlayer"
+    ],
+    "client": [
+      "dev.aiplayer.client.AIPlayerClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.11",
+    "minecraft": "1.20.1",
+    "java": ">=17",
+    "fabric-api": "*",
+    "fallingtree": "4.3.4"
+  },
+  "mixins": [
+    "aiplayer.mixins.json"
+  ]
+}

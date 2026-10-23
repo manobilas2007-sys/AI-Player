@@ -8,6 +8,7 @@ on:
         default: true
   push:
     branches: [main, master]
+  pull_request:
 permissions:
   contents: read
 jobs:
@@ -21,42 +22,24 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
-      - name: Locate source project
-        shell: bash
-        run: |
-          if [ -f build.gradle ]; then
-            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
-          else
-            ZIP=$(find . -maxdepth 1 -type f -iname '*v0.4.1*.zip' | sort -V | tail -n 1)
-            if [ -z "$ZIP" ]; then
-              echo "Nenhum projeto Gradle nem ZIP v0.4.1 na raiz" >&2
-              exit 1
-            fi
-            mkdir -p fontes
-            unzip -q "$ZIP" -d fontes
-            test -f fontes/build.gradle || { echo "ZIP sem build.gradle na raiz" >&2; exit 1; }
-            echo "PROJECT_DIR=fontes" >> "$GITHUB_ENV"
-          fi
       - name: Test commands and priority arbitration
-        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           mkdir -p build/standalone-tests
           javac -encoding UTF-8 -d build/standalone-tests src/main/java/dev/aiplayer/commands/PortugueseOrderParser.java src/main/java/dev/aiplayer/ai/brain/DecisionPolicy.java src/devtests/PortugueseOrderParserTest.java src/devtests/DecisionPolicyTest.java
           java -cp build/standalone-tests PortugueseOrderParserTest
           java -cp build/standalone-tests DecisionPolicyTest
       - name: Build mod and compile all GameTests
-        working-directory: ${{ env.PROJECT_DIR }}
         run: bash gradlew clean build compileTestmodJava --no-daemon --stacktrace
       - name: Run Minecraft regression suite
-        if: ${{ github.event_name == 'push' || inputs.run_gametests }}
-        working-directory: ${{ env.PROJECT_DIR }}
+        if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || inputs.run_gametests }}
         run: bash gradlew runGametest --no-daemon
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: AI-Player-v0.4.1-build-and-tests
           path: |
-            ${{ env.PROJECT_DIR }}/build/libs/ai-player-0.4.1-dev.jar
-            ${{ env.PROJECT_DIR }}/run-gametest/reports/
-            ${{ env.PROJECT_DIR }}/run-gametest/logs/latest.log
+            build/libs/ai-player-0.4.1-dev.jar
+            libs/FallingTree-1.20.1-4.3.4.jar
+            run-gametest/reports/
+            run-gametest/logs/latest.log
           if-no-files-found: warn

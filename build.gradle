@@ -1,0 +1,41 @@
+plugins {
+    id 'fabric-loom' version '1.6.12'
+    id 'maven-publish'
+}
+version = '0.4.1-dev'
+group = 'dev.aiplayer'
+base { archivesName = 'ai-player' }
+repositories { mavenCentral() }
+dependencies {
+    modImplementation files('libs/FallingTree-1.20.1-4.3.4.jar')
+    minecraft 'com.mojang:minecraft:1.20.1'
+    mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
+    modImplementation 'net.fabricmc:fabric-loader:0.15.11'
+    modImplementation 'net.fabricmc.fabric-api:fabric-api:0.92.2+1.20.1'
+}
+processResources { inputs.property 'version', project.version; filesMatching('fabric.mod.json') { expand 'version': project.version } }
+tasks.withType(JavaCompile).configureEach { options.release = 17; options.encoding = 'UTF-8' }
+java { withSourcesJar(); sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+
+sourceSets {
+    testmod {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+}
+loom {
+    mods {
+        aiplayer { sourceSet sourceSets.main }
+        aiplayer_test { sourceSet sourceSets.testmod }
+    }
+    runs {
+        gametest {
+            server()
+            name 'AI Player GameTests'
+            source sourceSets.testmod
+            vmArg '-Dfabric-api.gametest'
+            vmArg '-Dfabric-api.gametest.report-file=reports/gametest-results.xml'
+            runDir 'run-gametest'
+        }
+    }
+}

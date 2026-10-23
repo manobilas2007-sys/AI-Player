@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "aiplayer_test",
+  "version": "1.0.0",
+  "name": "AI Player Tests",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-gametest": [
+      "dev.aiplayer.test.CompanionTests",
+      "dev.aiplayer.test.SurfaceMiningTests",
+      "dev.aiplayer.test.WorldRegressionTests",
+      "dev.aiplayer.test.ExcavationTests",
+      "dev.aiplayer.test.FallingTreeTests"
+    ]
+  },
+  "depends": {
+    "aiplayer": "*",
+    "fabric-gametest-api-v1": "*"
+  }
+}
