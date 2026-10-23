@@ -17,53 +17,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Detectar versao mais recente
-        shell: bash
-        run: |
-          ZIP="$(find . -maxdepth 1 -type f \
-            -name 'AI_Player_Java_1.20.1_v*_dev_fontes.zip' \
-            | sort -V | tail -n 1)"
-
-          if [ -z "$ZIP" ]; then
-            echo "ERRO: ZIP do projeto nao encontrado."
-            exit 1
-          fi
-
-          VERSION="$(basename "$ZIP" | sed -E \
-            's/^AI_Player_Java_1\.20\.1_v([^_]+)_dev_fontes\.zip$/\1/')"
-
-          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-
-          echo "Compilando AI Player v$VERSION"
-
-      - name: Extrair projeto
-        run: |
-          mkdir -p fontes
-          unzip -q "$ZIP" -d fontes
-
-      - name: Localizar projeto Gradle
-        run: |
-          WRAPPER="$(find fontes -type f \
-            -name gradlew -print -quit)"
-
-          if [ -z "$WRAPPER" ]; then
-            echo "ERRO: gradlew nao encontrado."
-            exit 1
-          fi
-
-          echo "PROJECT_DIR=$(dirname "$WRAPPER")" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@v4
 
       - name: Compilar Minecraft Fabric 1.20.1
         run: |
-          cd "$PROJECT_DIR"
           bash gradlew clean build --no-daemon
 
       - name: Preparar JAR
         run: |
           mkdir -p dist
 
-          find "$PROJECT_DIR/build/libs" \
+          find build/libs \
             -maxdepth 1 \
             -type f \
             -name '*.jar' \
@@ -76,6 +40,6 @@ jobs:
       - name: Disponibilizar JAR
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Player-v${{ env.VERSION }}-JAR
+          name: AI-Player-v0.4.1-JAR
           path: dist/*.jar
           if-no-files-found: error

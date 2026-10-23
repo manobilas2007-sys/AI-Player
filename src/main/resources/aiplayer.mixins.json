@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "dev.aiplayer.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "MobGoalsAccess",
+    "BlockItemPlacementMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "refmap": "ai-player-refmap.json"
+}
