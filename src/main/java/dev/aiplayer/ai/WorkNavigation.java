@@ -75,13 +75,22 @@ public final class WorkNavigation {
         var world=npc.getWorld();
         for(var dir:net.minecraft.util.math.Direction.Type.HORIZONTAL)
             if(world.getBlockState(feet.offset(dir).down()).isSolidBlock(world,feet.offset(dir).down()))return false;
+        return stepDown(npc,path->surfacePath(npc,path,feet.getY()-1));
+    }
+    /** Walk down one block along a complete safe route; callers retain their
+     * work-area restrictions (for example, staying inside a covered cave). */
+    static boolean stepDown(CompanionEntity npc,java.util.function.Predicate<Path> routeAllowed){
+        if(!npc.isOnGround())return false;
+        BlockPos feet=npc.getBlockPos();
+        var world=npc.getWorld();
         for(var dir:net.minecraft.util.math.Direction.Type.HORIZONTAL){
             BlockPos landing=feet.offset(dir).down();
             if(!safeWorkFooting(npc,landing) || hazard(npc,landing.down())
                     || !world.isSpaceEmpty(npc,npc.getBoundingBox().offset(
                         landing.getX()+0.5-npc.getX(),landing.getY()-npc.getY(),landing.getZ()+0.5-npc.getZ())))continue;
             Path path=npc.getNavigation().findPathTo(landing,0);
-            if(surfacePath(npc,path,landing.getY()) && npc.getNavigation().startMovingAlong(path,1.0))return true;
+            if(surfacePath(npc,path,landing.getY()) && routeAllowed.test(path)
+                    && npc.getNavigation().startMovingAlong(path,1.0))return true;
         }
         return false;
     }

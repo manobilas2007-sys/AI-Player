@@ -87,6 +87,19 @@ public final class SurfaceStoneGathering {
         if(!WorkNavigation.safeWorkFooting(npc,p))return false;
         return !world.getBlockCollisions(npc,new Box(p.getX()+0.15,p.getY()+0.01,p.getZ()+0.15,p.getX()+0.85,p.getY()+2,p.getZ()+0.85)).iterator().hasNext();
     }
+    /** Wood pickup or bench work can leave us standing on the requested stone.
+     * A neighboring bench does not make that support mineable: descend first,
+     * without removing either support or entering an outdoor mining route. */
+    private boolean leaveStoneSupport(){
+        if(!(npc.getWorld() instanceof ServerWorld world))return false;
+        BlockPos support=npc.getBlockPos().down();
+        if(!world.isChunkLoaded(support) || !world.getBlockState(support).isOf(Blocks.STONE)
+                || OwnedBlocks.get(world).protectedBlock(support)
+                || OwnedBlocks.get(world).claimed(support))return false;
+        if(!WorkNavigation.stepDown(npc,path->surfaceRoute(path,npc.getBlockY()-1)))return false;
+        npc.intelligence().memory().remember("surface_stone",support,npc.getWorld().getTime(),24000);
+        return true;
+    }
     private boolean surfaceRoute(Path path,int y){
         if(!WorkNavigation.surfacePath(npc,path,y))return false;
         for(int i=0;i<path.getLength();i++){
@@ -181,10 +194,14 @@ public final class SurfaceStoneGathering {
         }
         // Navigation during a jump is not evidence that the destination is unreachable.
         if(!npc.isOnGround())return Result.ACTIVE;
-        if(WorkNavigation.leaveIsolatedPerch(npc))return Result.ACTIVE;
         if(center==null){center=npc.getBlockPos().toImmutable();scanStarted=npc.age;floorSeen=false;
             var memory=npc.intelligence().memory().nearest("surface_stone",center,npc.getWorld().getTime(),32);
             if(memory.isPresent() && select(memory.get()))return Result.ACTIVE;
+        }
+        // Reconsider the former support before taking another downward step.
+        // Once below it, this observed stone is a wall we can mine normally.
+        if(leaveStoneSupport() || WorkNavigation.leaveIsolatedPerch(npc)){
+            center=null;return Result.ACTIVE;
         }
         // Underground stone floors may cover thousands of cells. Do not spend
         // minutes rejecting their unsafe individual blocks when we can instead
