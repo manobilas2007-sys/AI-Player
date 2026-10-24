@@ -168,6 +168,26 @@ public class SurfaceMiningTests implements FabricGameTest {
         c.runAtTick(2200,()->{c.assertTrue(a.backpack.count(Items.COBBLESTONE)==1 && owns(a,Items.WOODEN_PICKAXE) && !a.gathering().active(),"Full sequence failed"+debug(a)+a.gathering().stoneDiagnostics(c.getAbsolutePos(p)));c.complete();});
     }
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="surface",tickLimit=650)
+    public void stepsOffStoneBesideBenchBeforeMining(TestContext c){
+        CompanionEntity a=worker(c);a.setMode(Mode.WAIT);
+        a.equipStack(EquipmentSlot.MAINHAND,new ItemStack(Items.WOODEN_PICKAXE));
+        BlockPos stone=new BlockPos(4,2,4),bench=stone.west();
+        c.setBlockState(stone,Blocks.STONE);
+        c.setBlockState(bench,Blocks.CRAFTING_TABLE);
+        OwnedBlocks.get(c.getWorld()).playerPlaced(c.getWorld(),c.getAbsolutePos(bench));
+        Vec3d start=Vec3d.ofBottomCenter(c.getAbsolutePos(stone.up()));
+        a.refreshPositionAndAngles(start.x,start.y,start.z,0,0);
+        c.runAtTick(5,()->a.gathering().start(ResourceGathering.Kind.STONE,1,true));
+        c.runAtTick(600,()->{
+            c.assertTrue(a.backpack.count(Items.COBBLESTONE)==1 && !a.gathering().active(),
+                "Did not step down before mining its former support"+debug(a)
+                    +a.gathering().stoneDiagnostics(c.getAbsolutePos(stone)));
+            c.assertTrue(c.getWorld().getBlockState(c.getAbsolutePos(bench)).isOf(Blocks.CRAFTING_TABLE),
+                "Destroyed protected bench while leaving stone");
+            c.complete();
+        });
+    }
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="surface",tickLimit=650)
     public void choosesAnotherGalleryApproachAroundProtectedBench(TestContext c){
         CompanionEntity a=worker(c);a.setMode(Mode.WAIT);
         a.equipStack(EquipmentSlot.MAINHAND,new ItemStack(Items.WOODEN_PICKAXE));
