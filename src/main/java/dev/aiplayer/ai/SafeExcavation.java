@@ -191,7 +191,7 @@ public final class SafeExcavation {
             // The destination has a verified real floor. Path to the newly
             // excavated cell, and use the normal motion controller if vanilla
             // cannot negotiate the one-step downward stair.
-            Path route=npc.getNavigation().findPathTo(destination,0);
+            Path route=WorkNavigation.findPath(npc,destination,0,dev.aiplayer.ai.navigation.NpcPathfinder.Mode.CAVE);
             if(route!=null && route.reachesTarget())npc.getNavigation().startMovingAlong(route,1.05);
             else if(npc.getBlockPos().getManhattanDistance(destination)<=3)
                 npc.getMoveControl().moveTo(destination.getX()+0.5,destination.getY(),destination.getZ()+0.5,0.9);

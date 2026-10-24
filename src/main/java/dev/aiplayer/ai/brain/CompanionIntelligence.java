@@ -37,7 +37,7 @@ public final class CompanionIntelligence {
     public BrainMemory memory(){return memory;}
     public DecisionPolicy.Activity activity(){return activity;}
     public ResourcePlan plan(){return plan;}
-    public String status(){return activity+": "+memory.reason()+" | "+memory.objective()+" / "+memory.step()+" | faltam: "+plan.missingLogs()+" troncos, "+plan.missingFood()+" alimentos, "+ResourcePlan.stoneNeeded(npc)+" pedregulhos para melhorias";}
+    public String status(){return (npc.tasks().active()?npc.tasks().status()+" | ":"")+activity+": "+memory.reason()+" | "+memory.objective()+" / "+memory.step()+" | faltam: "+plan.missingLogs()+" troncos, "+plan.missingFood()+" alimentos, "+ResourcePlan.stoneNeeded(npc)+" pedregulhos para melhorias";}
     public void navigationFailed(){routeFailures++;npc.speech().notice(CompanionSpeech.Event.ROUTE);}
     public void clearSuspended(){suspendedJob=null;materialJob=null;nextMaterialAt=0;}
     private boolean enemy(LivingEntity e){
@@ -127,7 +127,7 @@ public final class CompanionIntelligence {
         boolean stoneOrderReady=npc.gathering().active()
             && npc.gathering().kind()==ResourceGathering.Kind.STONE
             && SurfaceStoneGathering.hasPick(npc);
-        boolean automaticGatherAllowed=!danger && !npc.menuOpen() && !wait
+        boolean automaticGatherAllowed=!danger && !npc.menuOpen() && !wait && !npc.tasks().active()
             && owner!=null && !owner.isSpectator() && !following
             && !npc.gathering().active() && !npc.gathering().hasCleanup()
             && npc.gathering().canStartAutomatic();
@@ -212,11 +212,12 @@ public final class CompanionIntelligence {
         int craftPriority=axeMaintenance && !npc.gathering().cleanupReady()
             ? (wait && !npc.gathering().isManual()?85:78) : 65;
         if(craft)add(candidates,CRAFT,craftPriority,"Preparar materiais, fabricar e verificar equipamento");
-        if(wait && !npc.gathering().isManual() && !npc.gathering().cleanupReady())add(candidates,WAIT,80,"Aguardando ordem");
-        if(owner!=null && following && npc.gathering().canYieldToOwner())
+        if(wait && !npc.tasks().active() && !npc.gathering().isManual() && !npc.gathering().cleanupReady())add(candidates,WAIT,80,"Aguardando ordem");
+        if(owner!=null && following && !npc.tasks().active() && npc.gathering().canYieldToOwner())
             add(candidates,FOLLOW,70,"Reaproximar do dono sem perder a tarefa");
         if(npc.gathering().active())add(candidates,GATHER,npc.gathering().isManual()?60:50,
             "Coletar "+npc.gathering().kind()+" "+npc.gathering().progress()+"/"+npc.gathering().goal());
+        if(npc.tasks().active())add(candidates,PROJECT,61,npc.tasks().status());
         boolean noCapacity=npc.gathering().kind()==ResourceGathering.Kind.FOOD?!ResourcePlan.foodCapacity(npc):npc.gathering().kind()==ResourceGathering.Kind.STONE?!ResourcePlan.stoneCapacity(npc):plan.full();
         if(noCapacity && npc.gathering().active() && !npc.gathering().hasCleanup())
             add(candidates,INVENTORY_FULL,62,"Mochila sem espaço; preservar blocos e recursos");
@@ -225,12 +226,14 @@ public final class CompanionIntelligence {
             memory.transition(activity,decision.activity(),decision.reason(),npc.gathering().active() || npc.crafting().hasSession());
             if(activity==GATHER || activity==CLEANUP)npc.gathering().pause();
             if(activity==CRAFT)npc.crafting().pause();
+            if(activity==PROJECT)npc.tasks().pause();
             npc.getNavigation().stop();npc.clearActionVisual();navigation.reset();nextMove=0;
             activity=decision.activity();
         } else memory.transition(activity,activity,decision.reason(),false);
         if(npc.autoEquip && !npc.isEating() && npc.age%20==0
-                && activity!=GATHER && activity!=CLEANUP && activity!=CRAFT)npc.optimizeEquipment();
-        if(activity!=GATHER && activity!=CLEANUP && (npc.gathering().active() || npc.gathering().hasCleanup()))npc.gathering().pause();
+                && activity!=GATHER && activity!=CLEANUP && activity!=CRAFT && activity!=PROJECT)npc.optimizeEquipment();
+        if(activity!=GATHER && activity!=CLEANUP && activity!=PROJECT && (npc.gathering().active() || npc.gathering().hasCleanup()))npc.gathering().pause();
+        if(activity!=PROJECT && npc.tasks().active())npc.tasks().pause();
         switch(activity) {
             case WAIT -> npc.getNavigation().stop();
             case ESCAPE -> escape();
@@ -252,6 +255,7 @@ public final class CompanionIntelligence {
                 npc.gathering().resume();
                 if(!npc.gathering().tick())idle(owner);
             }
+            case PROJECT -> {memory.plan("Ordem de projeto",npc.tasks().status());npc.tasks().tick();}
             case FOLLOW -> follow(owner);
             case INVENTORY_FULL -> {
                 npc.gathering().pause();
@@ -307,7 +311,7 @@ public final class CompanionIntelligence {
     }
     private boolean startSafe(BlockPos pos,double speed) {
         if(memory.blocked(pos,npc.getWorld().getTime()))return false;
-        var path=npc.getNavigation().findPathTo(pos,0);
+        var path=WorkNavigation.findPath(npc,pos,0,dev.aiplayer.ai.navigation.NpcPathfinder.Mode.SAFE);
         if(!WorkNavigation.surfacePath(npc,path,pos.getY())){
             memory.failed(pos,npc.getWorld().getTime());routeFailures++;return false;
         }

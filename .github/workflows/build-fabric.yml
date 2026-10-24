@@ -25,20 +25,41 @@ jobs:
       - name: Test commands and priority arbitration
         run: |
           mkdir -p build/standalone-tests
-          javac -encoding UTF-8 -d build/standalone-tests src/main/java/dev/aiplayer/commands/PortugueseOrderParser.java src/main/java/dev/aiplayer/ai/brain/DecisionPolicy.java src/devtests/PortugueseOrderParserTest.java src/devtests/DecisionPolicyTest.java
+          javac -encoding UTF-8 -d build/standalone-tests src/main/java/dev/aiplayer/commands/PortugueseOrderParser.java src/main/java/dev/aiplayer/ai/brain/DecisionPolicy.java src/devtests/PortugueseOrderParserTest.java src/devtests/DecisionPolicyTest.java src/devtests/ProjectOrderParserTest.java
           java -cp build/standalone-tests PortugueseOrderParserTest
           java -cp build/standalone-tests DecisionPolicyTest
+          java -cp build/standalone-tests ProjectOrderParserTest
       - name: Build mod and compile all GameTests
-        run: bash gradlew clean build compileTestmodJava --no-daemon --stacktrace
+        run: bash gradlew clean :embedded-baritone:build build compileTestmodJava --no-daemon --stacktrace
+      - name: Verify embedded library and corresponding sources
+        run: python3 tools/check_embedded_baritone.py
+      - name: Record corresponding source revision
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import os, subprocess
+          revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          repo = os.environ['GITHUB_REPOSITORY']
+          Path('SOURCE_REVISION.txt').write_text(f'Repository: https://github.com/{repo}\nCommit: {revision}\nSource: https://github.com/{repo}/tree/{revision}\nBaritone upstream: 8c55ad0721d42a01a359834edc16aaa9b5bc587d\n')
+          PYCODE
       - name: Run Minecraft regression suite
         if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || inputs.run_gametests }}
         run: bash gradlew runGametest --no-daemon
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AI-Player-v0.4.1-build-and-tests
+          name: AI-Player-v0.5.0-Baritone-NPC-build-and-tests
           path: |
-            build/libs/ai-player-0.4.1-dev.jar
+            build/libs/ai-player-*.jar
+            embedded-baritone/build/libs/*-sources.jar
+            embedded-baritone/build.gradle
+            embedded-baritone/upstream/
+            build.gradle
+            settings.gradle
+            LICENSE.md
+            SOURCE_REVISION.txt
+            third-party/Baritone/
+            docs/INTEGRACAO_BARITONE.md
             libs/FallingTree-1.20.1-4.3.4.jar
             run-gametest/reports/
             run-gametest/logs/latest.log

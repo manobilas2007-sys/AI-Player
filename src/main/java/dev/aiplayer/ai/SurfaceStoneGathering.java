@@ -133,7 +133,7 @@ public final class SurfaceStoneGathering {
         }
         if(standable(npc.getBlockPos(),p) && excavation.canOpenGalleryFrom(npc.getBlockPos(),p) && mining.reachable(p)){selected(p,npc.getBlockPos());return true;}
         for(BlockPos feet:spots){
-            Path path=npc.getNavigation().findPathTo(feet,0);
+            Path path=WorkNavigation.findPath(npc,feet,0,dev.aiplayer.ai.navigation.NpcPathfinder.Mode.CAVE);
             if(surfaceRoute(path,feet.getY())){selected(p,feet);return true;}
         }
         avoided.put(p,npc.getWorld().getTime()+50);return false;
@@ -187,7 +187,7 @@ public final class SurfaceStoneGathering {
             // or when measurable progress has stopped, preventing stop/start shuffling.
             if(npc.age>=nextRoute && npc.isOnGround()
                     && (npc.getNavigation().isIdle() || npc.age-routeStarted>45)){
-                nextRoute=npc.age+20;Path path=npc.getNavigation().findPathTo(stance,0);
+                nextRoute=npc.age+20;Path path=WorkNavigation.findPath(npc,stance,0,dev.aiplayer.ai.navigation.NpcPathfinder.Mode.CAVE);
                 if(!surfaceRoute(path,stance.getY()) || !npc.getNavigation().startMovingAlong(path,1.1))failed();
             }
             return Result.ACTIVE;

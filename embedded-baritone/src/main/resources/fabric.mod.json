@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "aiplayer_baritone_core",
+  "version": "1.10.5-npc.1",
+  "name": "AI Player embedded Baritone core",
+  "description": "Server-neutral LGPL source adaptation of Baritone planning algorithms for AI Player NPCs.",
+  "authors": ["Baritone contributors", "AI Player adaptations"],
+  "environment": "*",
+  "license": "LGPL-3.0-or-later",
+  "contact": {
+    "sources": "https://github.com/manobilas2007-sys/AI-Player/tree/main/embedded-baritone"
+  },
+  "depends": { "java": ">=17", "minecraft": "1.20.1" }
+}

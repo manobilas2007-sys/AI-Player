@@ -2,11 +2,13 @@ plugins {
     id 'fabric-loom' version '1.6.12'
     id 'maven-publish'
 }
-version = '0.4.1-dev'
+version = '0.5.0-dev'
 group = 'dev.aiplayer'
 base { archivesName = 'ai-player' }
 repositories { mavenCentral() }
 dependencies {
+    implementation project(':embedded-baritone')
+    include project(':embedded-baritone')
     modImplementation files('libs/FallingTree-1.20.1-4.3.4.jar')
     minecraft 'com.mojang:minecraft:1.20.1'
     mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
@@ -38,4 +40,9 @@ loom {
             runDir 'run-gametest'
         }
     }
+}
+
+// Keep the LGPL library replaceable inside the distribution and ship its notices.
+processResources {
+    from('third-party/Baritone') { into 'META-INF/licenses/baritone' }
 }

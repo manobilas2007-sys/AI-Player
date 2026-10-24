@@ -1,6 +1,7 @@
 package dev.aiplayer.ai;
 
 import dev.aiplayer.entity.CompanionEntity;
+import dev.aiplayer.ai.navigation.NpcPathfinder;
 import net.minecraft.entity.ai.pathing.Path;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -11,6 +12,16 @@ import net.minecraft.registry.tag.BlockTags;
 /** Work destinations are standable positions beside the target, never the solid target itself. */
 public final class WorkNavigation {
     private WorkNavigation() {}
+    public static Path findPath(CompanionEntity npc,BlockPos target,int distance){
+        return findPath(npc,target,distance,NpcPathfinder.Mode.WORK);
+    }
+    public static Path findPath(CompanionEntity npc,BlockPos target,int distance,NpcPathfinder.Mode mode){
+        return findPath(npc,target,distance,mode,pos->true);
+    }
+    public static Path findPath(CompanionEntity npc,BlockPos target,int distance,NpcPathfinder.Mode mode,
+                                java.util.function.Predicate<BlockPos> allowed){
+        return NpcPathfinder.findPath(npc,target,distance,mode,allowed);
+    }
     public static boolean safePath(CompanionEntity npc, Path path, int floorY) {
         if(path==null || !path.reachesTarget())return false;
         for(int i=0;i<path.getLength();i++) {
@@ -27,21 +38,30 @@ public final class WorkNavigation {
      * The exception for one exposed edge permits natural hillsides, while ruling
      * out the thin, unsupported test-arena ledges that used to dump the worker.
      */
+    public static boolean supportedGround(CompanionEntity npc,BlockPos pos){
+        var world=npc.getWorld();
+        if(!world.isChunkLoaded(pos) || !world.getFluidState(pos).isEmpty())return false;
+        var state=world.getBlockState(pos);
+        // These two vanilla soils have a 15/16-height top. Feet are sampled at
+        // the same integer navigation node as ordinary dirt, without jumping.
+        return state.isSolidBlock(world,pos) || state.isOf(net.minecraft.block.Blocks.FARMLAND)
+            || state.isOf(net.minecraft.block.Blocks.DIRT_PATH);
+    }
     public static boolean safeWorkFooting(CompanionEntity npc,BlockPos feet){
         var world=npc.getWorld();
         if(!world.isChunkLoaded(feet) || !world.isChunkLoaded(feet.down())
-                || !world.getBlockState(feet.down()).isSolidBlock(world,feet.down())
+                || !supportedGround(npc,feet.down())
                 || !world.getFluidState(feet).isEmpty() || !world.getFluidState(feet.up()).isEmpty())return false;
         int deepDrops=0;
         for(net.minecraft.util.math.Direction direction:net.minecraft.util.math.Direction.Type.HORIZONTAL){
             BlockPos side=feet.offset(direction);
             if(!world.isChunkLoaded(side) || !world.isChunkLoaded(side.down()))return false;
-            if(!world.getBlockState(side.down()).isSolidBlock(world,side.down())){
+            if(!supportedGround(npc,side.down())){
                 boolean nearGround=false;
                 for(int depth=2;depth<=3;depth++){
                     BlockPos below=side.down(depth);
                     if(!world.isChunkLoaded(below))return false;
-                    if(world.getBlockState(below).isSolidBlock(world,below)){nearGround=true;break;}
+                    if(supportedGround(npc,below)){nearGround=true;break;}
                 }
                 if(!nearGround && ++deepDrops>=2)return false;
             }
@@ -121,8 +141,8 @@ public final class WorkNavigation {
                 if(!npc.getWorld().isChunkLoaded(p) || !npc.getWorld().getFluidState(p).isEmpty()
                     || !npc.getWorld().getBlockState(p).getCollisionShape(npc.getWorld(),p).isEmpty()
                     || !npc.getWorld().getBlockState(p.up()).getCollisionShape(npc.getWorld(),p.up()).isEmpty()
-                    || !npc.getWorld().getBlockState(p.down()).isSolidBlock(npc.getWorld(),p.down()))continue;
-                Path path=npc.getNavigation().findPathTo(p,0);
+                    || !supportedGround(npc,p.down()))continue;
+                Path path=findPath(npc,p,0);
                 if(!surfacePath(npc,path,groundY))continue;
                 double value=path.getLength()+p.getSquaredDistance(target)*0.1;
                 if(value<score){score=value;best=path;}
@@ -145,7 +165,7 @@ public final class WorkNavigation {
             var hit=npc.getWorld().raycast(new RaycastContext(at.add(0,npc.getStandingEyeHeight(),0),
                 drop.getPos().add(0,0.1,0),RaycastContext.ShapeType.COLLIDER,RaycastContext.FluidHandling.NONE,npc));
             if(hit.getType()!=HitResult.Type.MISS)continue;
-            Path path=npc.getNavigation().findPathTo(feet,0);
+            Path path=findPath(npc,feet,0,waterRoute?NpcPathfinder.Mode.WATER:NpcPathfinder.Mode.WORK);
             if(!(waterRoute ? safePath(npc,path,Math.min(npc.getBlockY(),drop.getBlockY())-3)
                     : surfacePath(npc,path,feet.getY())))continue;
             var end=path.getEnd();

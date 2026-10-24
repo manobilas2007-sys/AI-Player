@@ -372,7 +372,7 @@ public final class TemporaryPillar {
                             && npc.getAir()>150 && npc.getBlockY()-exit.getY()<=1;
                     if (!waterExit && !WorkNavigation.safeWorkFooting(npc,exit))continue;
                     if(!waterExit){
-                        var path=npc.getNavigation().findPathTo(exit,0);
+                        var path=WorkNavigation.findPath(npc,exit,0,dev.aiplayer.ai.navigation.NpcPathfinder.Mode.SAFE);
                         if (WorkNavigation.safePath(npc,path,Math.min(exit.getY(),npc.getBlockY())-1)
                                 && npc.getNavigation().startMovingAlong(path,1.05))return true;
                     }

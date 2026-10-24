@@ -78,7 +78,7 @@ public final class TerrainRecovery {
             for(Direction d:Direction.Type.HORIZONTAL){
                 BlockPos rim=feet.offset(d).up();
                 if(!clear(rim) || !clear(rim.up()) || !npc.getWorld().getBlockState(rim.down()).isSolidBlock(npc.getWorld(),rim.down()))continue;
-                var path=npc.getNavigation().findPathTo(rim,0);
+                var path=WorkNavigation.findPath(npc,rim,0,dev.aiplayer.ai.navigation.NpcPathfinder.Mode.SAFE);
                 if(WorkNavigation.safePath(npc,path,feet.getY())){step=rim;stepStarted=npc.age;npc.getNavigation().startMovingAlong(path,1);return true;}
             }
             active=false;mining.reset();return false;
@@ -93,7 +93,7 @@ public final class TerrainRecovery {
                     || !npc.getWorld().getBlockState(side.down()).isSolidBlock(npc.getWorld(),side.down()))continue;
                 Box swept=npc.getBoundingBox().offset(Vec3d.ofBottomCenter(side).subtract(npc.getPos())).stretch(0,1.25,0);
                 if(!npc.getWorld().isSpaceEmpty(npc,swept))continue;
-                var path=npc.getNavigation().findPathTo(side,0);
+                var path=WorkNavigation.findPath(npc,side,0,dev.aiplayer.ai.navigation.NpcPathfinder.Mode.SAFE);
                 if(WorkNavigation.safePath(npc,path,here.getY())){
                     step=side;stepStarted=npc.age;npc.getNavigation().startMovingAlong(path,1);return true;
                 }
