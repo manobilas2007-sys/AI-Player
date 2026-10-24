@@ -127,21 +127,29 @@ public final class CompanionIntelligence {
         boolean stoneOrderReady=npc.gathering().active()
             && npc.gathering().kind()==ResourceGathering.Kind.STONE
             && SurfaceStoneGathering.hasPick(npc);
+        boolean automaticGatherAllowed=!danger && !npc.menuOpen() && !wait
+            && owner!=null && !owner.isSpectator() && !following
+            && !npc.gathering().active() && !npc.gathering().hasCleanup()
+            && npc.gathering().canStartAutomatic();
+        boolean canStartStoneExpedition=automaticGatherAllowed && stoneShortage
+            && npc.getHealth()>=12 && SurfaceStoneGathering.caveAccess(npc,npc.getBlockPos());
         // When a reclaimed bench is immediately in the path of an automatic
         // stone expedition, remove that real obstruction first. The bounded
         // physical reclamation then releases the route to the stone wall.
         // For a manual stone order, never let cleanup override the order.
-        boolean benchBlocksStoneRoute=stoneShortage && !npc.gathering().isManual()
+        boolean benchBlocksStoneRoute=(stoneOrderReady || canStartStoneExpedition)
+            && !npc.gathering().isManual()
             && npc.crafting().nearbyBenchObstruction();
+        // A desired future stone upgrade is not an active expedition. Yielding
+        // merely because stone is missing can strand a stale bench recovery and
+        // suppress axe renewal during WOOD or after it finishes outdoors.
         boolean benchMayYield=npc.crafting().isReclaiming()
-            && (stoneShortage || stoneOrderReady) && !benchBlocksStoneRoute;
-        if(!danger && !npc.menuOpen() && !wait && owner!=null && !owner.isSpectator()
-                && !following && !npc.gathering().active() && !npc.gathering().hasCleanup()
-                && npc.gathering().canStartAutomatic() && (!npc.crafting().isWorking() || benchMayYield)) {
+            && (stoneOrderReady || canStartStoneExpedition) && !benchBlocksStoneRoute;
+        if(automaticGatherAllowed && (!npc.crafting().isWorking() || benchMayYield)) {
             // A stone pick and two cobblestones already form a viable upgrade plan.
             // The four-log reserve is desirable, but NOT a prerequisite for
             // collecting the final cobblestone needed by the remaining tool.
-            if(stoneShortage && npc.getHealth()>=12 && SurfaceStoneGathering.caveAccess(npc,npc.getBlockPos()))
+            if(canStartStoneExpedition)
                 npc.gathering().start(ResourceGathering.Kind.STONE,ResourcePlan.stoneNeeded(npc),false);
             else if(npc.autoCraft && plan.missingLogs()>0 && (plan.toolsNeeded() || plan.missingFood()==0))
                 npc.gathering().start(ResourceGathering.Kind.WOOD,Math.min(32,plan.missingLogs()),false);
