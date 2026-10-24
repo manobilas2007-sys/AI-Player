@@ -75,22 +75,39 @@ public final class WorkNavigation {
         var world=npc.getWorld();
         for(var dir:net.minecraft.util.math.Direction.Type.HORIZONTAL)
             if(world.getBlockState(feet.offset(dir).down()).isSolidBlock(world,feet.offset(dir).down()))return false;
-        return stepDown(npc,path->surfacePath(npc,path,feet.getY()-1));
+        return stepDown(npc,pos->true);
     }
-    /** Walk down one block along a complete safe route; callers retain their
-     * work-area restrictions (for example, staying inside a covered cave). */
-    static boolean stepDown(CompanionEntity npc,java.util.function.Predicate<Path> routeAllowed){
+    /** A single physical step off a ledge. Vanilla pathfinding can refuse the
+     * drop from a fractional edge position, so validate the swept body and
+     * landing directly, then walk sideways and let gravity lower the NPC. */
+    static boolean stepDown(CompanionEntity npc,java.util.function.Predicate<BlockPos> allowed){
         if(!npc.isOnGround())return false;
         BlockPos feet=npc.getBlockPos();
+        if(!allowed.test(feet))return false;
         var world=npc.getWorld();
         for(var dir:net.minecraft.util.math.Direction.Type.HORIZONTAL){
-            BlockPos landing=feet.offset(dir).down();
-            if(!safeWorkFooting(npc,landing) || hazard(npc,landing.down())
-                    || !world.isSpaceEmpty(npc,npc.getBoundingBox().offset(
-                        landing.getX()+0.5-npc.getX(),landing.getY()-npc.getY(),landing.getZ()+0.5-npc.getZ())))continue;
-            Path path=npc.getNavigation().findPathTo(landing,0);
-            if(surfacePath(npc,path,landing.getY()) && routeAllowed.test(path)
-                    && npc.getNavigation().startMovingAlong(path,1.0))return true;
+            BlockPos side=feet.offset(dir),landing=side.down();
+            if(!allowed.test(side) || !allowed.test(landing)
+                    || !safeWorkFooting(npc,landing) || hazard(npc,landing.down()))continue;
+            double dx=side.getX()+0.5-npc.getX(),dz=side.getZ()+0.5-npc.getZ();
+            var sideways=npc.getBoundingBox().stretch(dx,0,dz);
+            var downward=npc.getBoundingBox().offset(dx,-1,dz).stretch(0,1,0);
+            if(!world.isSpaceEmpty(npc,sideways) || !world.isSpaceEmpty(npc,downward))continue;
+            boolean safe=true;
+            // Check the whole short movement for fluids, hazards and unloaded cells.
+            var bounds=sideways.union(downward);
+            for(BlockPos cell:BlockPos.iterate(BlockPos.ofFloored(bounds.minX,bounds.minY,bounds.minZ),
+                    BlockPos.ofFloored(bounds.maxX,bounds.maxY,bounds.maxZ))){
+                if(!world.isChunkLoaded(cell) || !world.getFluidState(cell).isEmpty() || hazard(npc,cell)){
+                    safe=false;break;
+                }
+            }
+            double distance=Math.sqrt(dx*dx+dz*dz);
+            if(!safe || distance<0.1)continue;
+            npc.getNavigation().stop();
+            npc.getMoveControl().moveTo(side.getX()+0.5,landing.getY(),side.getZ()+0.5,1.05);
+            npc.setVelocity(dx/distance*0.21,npc.getVelocity().y,dz/distance*0.21);
+            return true;
         }
         return false;
     }

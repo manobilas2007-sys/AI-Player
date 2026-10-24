@@ -96,7 +96,7 @@ public final class SurfaceStoneGathering {
         if(!world.isChunkLoaded(support) || !world.getBlockState(support).isOf(Blocks.STONE)
                 || OwnedBlocks.get(world).protectedBlock(support)
                 || OwnedBlocks.get(world).claimed(support))return false;
-        if(!WorkNavigation.stepDown(npc,path->surfaceRoute(path,npc.getBlockY()-1)))return false;
+        if(!WorkNavigation.stepDown(npc,pos->caveAccess(npc,pos)))return false;
         npc.intelligence().memory().remember("surface_stone",support,npc.getWorld().getTime(),24000);
         return true;
     }
