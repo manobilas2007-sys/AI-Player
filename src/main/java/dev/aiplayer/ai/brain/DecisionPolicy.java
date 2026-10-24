@@ -5,7 +5,7 @@ import java.util.List;
 
 /** Pure arbitration policy. Executors retain their own resumable progress; only one wins a tick. */
 public final class DecisionPolicy {
-    public enum Activity { IDLE, WAIT, FOLLOW, GATHER, CRAFT, CLEANUP, EAT, COMBAT, RETREAT, ESCAPE, INVENTORY_FULL }
+    public enum Activity { IDLE, WAIT, FOLLOW, GATHER, CRAFT, CLEANUP, EAT, COMBAT, RETREAT, ESCAPE, INVENTORY_FULL, PROJECT }
     public record Candidate(Activity activity, int priority, String reason) {}
     public record Decision(Activity activity, String reason) {}
     private DecisionPolicy() {}

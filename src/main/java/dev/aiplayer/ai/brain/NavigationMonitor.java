@@ -36,13 +36,13 @@ public final class NavigationMonitor {
         stagnant=0;attempts++;
         nav.stop();
         if(attempts==1) {
-            var retry=nav.findPathTo(dest,0);
+            var retry=WorkNavigation.findPath(npc,dest,0,dev.aiplayer.ai.navigation.NpcPathfinder.Mode.SAFE);
             if(WorkNavigation.safePath(npc,retry,Math.min(dest.getY(),npc.getBlockY())-2))
                 nav.startMovingAlong(retry,1.15);
         } else if(attempts==2) {
             Vec3d side=NoPenaltyTargeting.find(npc,4,2);
             if(side!=null) {
-                var detour=nav.findPathTo(BlockPos.ofFloored(side),0);
+                var detour=WorkNavigation.findPath(npc,BlockPos.ofFloored(side),0,dev.aiplayer.ai.navigation.NpcPathfinder.Mode.SAFE);
                 if(WorkNavigation.safePath(npc,detour,npc.getBlockY()-2))nav.startMovingAlong(detour,1.1);
             }
         } else {

@@ -1,2 +1,4 @@
 pluginManagement { repositories { maven { url = 'https://maven.fabricmc.net/' }; gradlePluginPortal(); mavenCentral() } }
 rootProject.name = 'ai-player'
+
+include 'embedded-baritone'
