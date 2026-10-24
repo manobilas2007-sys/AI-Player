@@ -20,3 +20,9 @@ Foram acrescentados dois GameTests com o inventário do relato: 55 SPRUCE_LOG, 1
 - `replacesWornAxeAfterWoodOrderAndBenchPickup`: sem ordem ativa, em GUARD, fora de caverna; exige consumo real de spruce, reposição e remoção do gasto.
 
 Os 80 testes anteriores, incluindo a regressão de descida para minerar pedra, permanecem intactos; a suíte agora contém 82 GameTests. Minecraft 1.20.1, Java 17, Gradle 8.7, Fabric, FallingTree e o ZIP r7 foram preservados.
+
+## Validação da descida na borda
+
+Os dois testes de reposição passaram no workflow 40050765251. Essa execução revelou que a sequência de inventário vazio ainda podia parar quando o NPC estivesse na borda da própria pedra. A descida agora valida o volume do corpo no trajeto lateral e na coluna de queda antes de aplicar movimento físico de um bloco, seguindo o padrão já usado na recuperação de pilares. Não há teletransporte nem remoção do apoio durante a descida.
+
+`stepsOffFractionalStoneEdgeBeforeMining` acrescenta a posição fracionária observada à cobertura de regressão, mantendo o teste anterior partindo do centro. A suíte final contém 83 GameTests; os 80 testes anteriores permanecem intactos.
