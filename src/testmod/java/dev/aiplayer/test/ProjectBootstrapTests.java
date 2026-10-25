@@ -15,6 +15,7 @@ import net.minecraft.block.LeavesBlock;
 import net.minecraft.block.enums.DoubleBlockHalf;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Item;
+import net.minecraft.item.AxeItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.nbt.NbtCompound;
@@ -102,9 +103,11 @@ public final class ProjectBootstrapTests implements FabricGameTest {
         Worker worker=world(c);CompanionEntity npc=worker.npc();
         BlockPos anchor=c.getAbsolutePos(ORDER.add(2,0,0));
         confirm(c,worker,"construa um abrigo de carvalho",CompanionTasks.Kind.BUILD_HOUSE);
+        boolean[] usedRealAxe={false};
         c.runAtTick(900,()->c.assertTrue(logs(c)<INITIAL_LOGS,
             "Confirmed empty-inventory shelter never started acquiring natural timber: "+diagnostics(npc)));
         c.runAtEveryTick(()->{
+            if(npc.getMainHandStack().getItem() instanceof AxeItem && npc.getMainHandStack().getDamage()>0)usedRealAxe[0]=true;
             if(npc.tasks().active())return;
             var palette=HouseBlueprint.palette("oak");
             for(var part:HouseBlueprint.plan(anchor,palette)){
@@ -120,6 +123,7 @@ public final class ProjectBootstrapTests implements FabricGameTest {
                 "House windows did not require physically gathering all five natural sand blocks");
             c.assertTrue(logs(c)<INITIAL_LOGS && count(npc,Items.WOODEN_PICKAXE)+count(npc,Items.STONE_PICKAXE)>0,
                 "House skipped its real timber/tool dependencies");
+            c.assertTrue(usedRealAxe[0],"Empty-inventory shelter gathered its whole wood supply without making and using its axe");
             worker.owner().discard();c.complete();
         });
         c.runAtTick(17900,()->{
@@ -136,9 +140,11 @@ public final class ProjectBootstrapTests implements FabricGameTest {
         // as in the reported failure. Confirmation must give the project control.
         npc.gathering().start(ResourceGathering.Kind.FOOD,3,false);
         confirm(c,worker,"crie uma plantação",CompanionTasks.Kind.CREATE_FARM);
+        boolean[] usedRealAxe={false};
         c.runAtTick(900,()->c.assertTrue(logs(c)<INITIAL_LOGS,
             "Confirmed empty-inventory farm never started acquiring natural timber: "+diagnostics(npc)));
         c.runAtEveryTick(()->{
+            if(npc.getMainHandStack().getItem() instanceof AxeItem && npc.getMainHandStack().getDamage()>0)usedRealAxe[0]=true;
             if(npc.tasks().active())return;
             c.assertTrue(npc.mode()==Mode.FOLLOW,"Finished empty-inventory farm did not return to following");
             for(int x=0;x<7;x++)for(int z=0;z<7;z++)if(x==0 || x==6 || z==0 || z==6){
@@ -156,6 +162,7 @@ public final class ProjectBootstrapTests implements FabricGameTest {
                 "Empty-inventory farm did not make and reuse exactly one real bucket");
             c.assertTrue(resource(c,28,Blocks.IRON_ORE)==2,
                 "Farm did not obtain exactly three iron inputs from real exposed ore");
+            c.assertTrue(usedRealAxe[0],"Empty-inventory farm never completed and used its own real axe prerequisite");
             for(int x:new int[]{34,37,40})c.assertFalse(c.getWorld().getBlockState(c.getAbsolutePos(new BlockPos(x,1,18))).isOf(Blocks.WATER),
                 "Farm created its water without draining three independent river sources");
             c.assertTrue(c.getWorld().getBlockState(anchor.add(-2,1,-3)).isOf(Blocks.CRAFTING_TABLE)

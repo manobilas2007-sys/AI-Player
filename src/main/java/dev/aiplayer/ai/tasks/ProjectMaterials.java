@@ -50,7 +50,7 @@ public final class ProjectMaterials {
     private int scanRadius,scanY,scanEdge,craftTicks,scans,searchAt,targetSince,nextRoute;
     private int lastEnsure=-1;
     private int woodHarvests;
-    private boolean preparingAxe;
+    private boolean preparingAxe,axePending,woodReceived;
     private double bestTargetDistance=Double.MAX_VALUE;
     private final Map<UUID,Integer> avoidedDrops=new HashMap<>();
     private UUID dropTarget;
@@ -93,7 +93,7 @@ public final class ProjectMaterials {
         scanRadius=0;scanY=0;scanEdge=0;scans=0;searchAt=0;targetSince=0;nextRoute=0;
         bestTargetDistance=Double.MAX_VALUE;dropProgressAt=0;
         dropTarget=null;bestDropDistance=Double.MAX_VALUE;avoidedDrops.clear();lastEnsure=-1;
-        woodHarvests=0;preparingAxe=false;
+        woodHarvests=0;preparingAxe=false;axePending=false;woodReceived=false;
         status="Conferir materiais do projeto";
     }
 
@@ -107,11 +107,30 @@ public final class ProjectMaterials {
         String current=world.getRegistryKey().getValue().toString();
         if(!dimension.isEmpty() && !dimension.equals(current)){cancel();furnace=null;bench=null;preferredFurnace=null;preferredBench=null;}
         dimension=current;
+        // A broken block still has a pickup delay. Only actual inventory is
+        // proof that the project's first wood has been physically delivered.
+        if(count(log)>0 || count(planks)>0)woodReceived=true;
+        if(npc.autoCraft && npc.autoEquip && !ResourcePlan.usable(npc,AxeItem.class) && wornAxe())axePending=true;
+        if(axePending && ResourcePlan.usable(npc,AxeItem.class))axePending=false;
+        // Reserve this subgoal's real logs/planks across ticks. Checking the
+        // parent count first would hand each newly collected log straight to
+        // the next floor/border block and starve the axe recipe forever.
+        if(axePending && npc.autoCraft && npc.autoEquip){
+            if(lastEnsure==npc.age)return false;
+            lastEnsure=npc.age;
+            prepareAxe(world);return false;
+        }
         if(count(item)>=amount)return true;
         if(lastEnsure==npc.age)return false;
         lastEnsure=npc.age;
         if(!npc.autoCraft){status="Entregue "+label(item)+" ou ative fabricação automática";return false;}
         return ensure(world,item,amount,0);
+    }
+    private void prepareAxe(ServerWorld world){
+        preparingAxe=true;
+        try{ensure(world,Items.WOODEN_AXE,count(Items.WOODEN_AXE)+1,0);}
+        finally{preparingAxe=false;}
+        if(ResourcePlan.usable(npc,AxeItem.class))axePending=false;
     }
     private boolean ensure(ServerWorld world,Item item,int amount,int depth){
         if(count(item)>=amount)return true;
@@ -346,17 +365,13 @@ public final class ProjectMaterials {
         // Never mine a support underneath any actor, even if it is natural.
         if(pos.equals(npc.getBlockPos().down()) || !world.getEntitiesByClass(LivingEntity.class,
                 new Box(pos.up()).expand(0.01),LivingEntity::isAlive).isEmpty())return false;
-        boolean exposed=false;
         for(Direction side:Direction.values()){
             BlockPos neighbor=pos.offset(side);
             if(!world.isChunkLoaded(neighbor))return false;
-            // Grass and flowers do not hide an otherwise reachable resource.
-            // A short tree can have vegetation on all four trunk sides and a
-            // canopy above, leaving no literal AIR neighbor at its base.
-            if(world.getBlockState(neighbor).getCollisionShape(world,neighbor).isEmpty())exposed=true;
             if(!world.getFluidState(neighbor).isEmpty())return false;
         }
-        if(!exposed)return false;
+        // The actual ray below decides exposure. Grass and thin snow can
+        // surround every trunk side without obscuring its reachable surface.
         if(item==log && !hasLeaves(world,pos))return false;
         return visibleLoaded(world,pos);
     }
@@ -401,16 +416,13 @@ public final class ProjectMaterials {
             status="As regras do mundo impedem minerar materiais com drops reais";return false;
         }
         if(item==log && npc.autoEquip && !preparingAxe && !ResourcePlan.usable(npc,AxeItem.class)
-                && (woodHarvests>0 || wornAxe())){
+                && (woodReceived || wornAxe())){
             // The first log is genuinely gathered by hand. When another log
             // is needed, this project owns its tool prerequisite instead of
             // yielding its ingredients to the unrelated starter-craft job.
             // The guard permits the axe recipe to gather its own missing logs
             // without recursing wood -> axe -> wood forever.
-            preparingAxe=true;
-            try{
-                ensure(world,Items.WOODEN_AXE,count(Items.WOODEN_AXE)+1,0);
-            }finally{preparingAxe=false;}
+            axePending=true;prepareAxe(world);
             return false;
         }
         BlockState required=item==Items.RAW_IRON?Blocks.IRON_ORE.getDefaultState():Blocks.STONE.getDefaultState();
@@ -483,6 +495,8 @@ public final class ProjectMaterials {
         NbtCompound n=new NbtCompound();n.putString("Dimension",dimension);
         n.putString("Log",Registries.ITEM.getId(log).toString());n.putString("Planks",Registries.ITEM.getId(planks).toString());
         n.putInt("WoodHarvests",woodHarvests);
+        n.putBoolean("AxePending",axePending);
+        n.putBoolean("WoodReceived",woodReceived);
         if(furnace!=null)n.putLong("Furnace",furnace.asLong());if(bench!=null)n.putLong("Bench",bench.asLong());
         if(preferredFurnace!=null)n.putLong("PreferredFurnace",preferredFurnace.asLong());
         if(preferredBench!=null)n.putLong("PreferredBench",preferredBench.asLong());
@@ -494,6 +508,8 @@ public final class ProjectMaterials {
         if(!root.contains("ProjectMaterials"))return;
         NbtCompound n=root.getCompound("ProjectMaterials");dimension=n.getString("Dimension");
         woodHarvests=Math.max(0,Math.min(10000,n.getInt("WoodHarvests")));
+        axePending=n.getBoolean("AxePending");
+        woodReceived=n.getBoolean("WoodReceived");
         Identifier l=Identifier.tryParse(n.getString("Log")),p=Identifier.tryParse(n.getString("Planks"));
         if(l!=null && p!=null)selectWood(Registries.ITEM.get(l),Registries.ITEM.get(p));
         if(!dimension.equals(npc.getWorld().getRegistryKey().getValue().toString())){dimension="";return;}

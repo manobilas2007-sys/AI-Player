@@ -104,6 +104,54 @@ public final class ProjectMaterialsTests implements FabricGameTest {
         });
     }
 
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=1800)
+    public void oneLogAtATimeReservesAndRestoresItsAxeThenRenewsAWornOne(TestContext c){
+        CompanionEntity npc=worker(c);owner(npc);
+        npc.tasks().startAt(CompanionTasks.Kind.TEND_FARM,npc.getBlockPos(),null);
+        ProjectWork work=new ProjectWork(npc);ProjectMaterials[] materials={new ProjectMaterials(npc,work)};
+        BlockPos bench=c.getAbsolutePos(new BlockPos(3,2,6));materials[0].preferWorkbench(bench);
+        for(int x=0;x<26;x++)for(int z=0;z<14;z++){
+            c.setBlockState(new BlockPos(x,1,z),Blocks.DIRT);
+            c.setBlockState(new BlockPos(x,2,z),Blocks.GRASS);
+        }
+        for(int x:new int[]{8,12,16,20}){
+            for(int y=2;y<=4;y++)c.setBlockState(new BlockPos(x,y,4),Blocks.OAK_LOG);
+            for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++)c.setBlockState(new BlockPos(x+dx,5,4+dz),Blocks.OAK_LEAVES);
+        }
+        int[] placed={0};boolean[] resumed={false},wore={false},renewed={false};
+        c.runAtEveryTick(()->{
+            if(placed[0]>=4)return;
+            boolean available=materials[0].ensure(Items.OAK_LOG,1);
+            NbtCompound state=new NbtCompound();materials[0].writeNbt(state);
+            if(!resumed[0] && state.getCompound("ProjectMaterials").getBoolean("AxePending")){
+                materials[0]=new ProjectMaterials(npc,work);materials[0].readNbt(state);resumed[0]=true;
+            }
+            ItemStack axe=npc.getMainHandStack().isOf(Items.WOODEN_AXE)?npc.getMainHandStack():ItemStack.EMPTY;
+            for(int i=0;i<npc.backpack.size() && axe.isEmpty();i++)
+                if(npc.backpack.getStack(i).isOf(Items.WOODEN_AXE))axe=npc.backpack.getStack(i);
+            if(!wore[0] && !axe.isEmpty()){
+                axe.setDamage(axe.getMaxDamage()-1);wore[0]=true;
+            }else if(wore[0] && !axe.isEmpty() && !dev.aiplayer.ai.brain.ResourcePlan.worn(axe))renewed[0]=true;
+            if(available){
+                if(placed[0]>0)c.assertTrue(renewed[0],"Parent consumed the axe subgoal's next log before a real replacement existed");
+                BlockPos next=c.getAbsolutePos(new BlockPos(4+placed[0],2,10));
+                if(!c.getWorld().getBlockState(next).isAir()){work.clearNatural(next);return;}
+                if(work.place(next,Blocks.OAK_LOG.getDefaultState(),Items.OAK_LOG,1))placed[0]++;
+            }
+        });
+        c.runAtTick(1660,()->{
+            c.assertTrue(placed[0]==4,"Repeated one-log parent stalled: placed="+placed[0]+" "+materials[0].status());
+            c.assertTrue(resumed[0] && wore[0] && renewed[0],"Axe dependency did not persist through save and worn-tool renewal");
+            c.assertTrue(materials[0].count(Items.WOODEN_AXE)==1
+                    && dev.aiplayer.ai.brain.ResourcePlan.usable(npc,net.minecraft.item.AxeItem.class),
+                "Project did not retain exactly one usable real replacement axe");
+            c.assertTrue(c.getWorld().getBlockState(bench).isOf(Blocks.CRAFTING_TABLE)
+                    && OwnedBlocks.get(c.getWorld()).owned(bench,npc.getUuid()),"Axe bootstrap used a virtual bench");
+            for(int i=0;i<4;i++)c.assertTrue(c.getWorld().getBlockState(c.getAbsolutePos(new BlockPos(4+i,2,10))).isOf(Blocks.OAK_LOG),
+                "Sequential log delivery did not place its real block");c.complete();
+        });
+    }
+
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=160)
     public void craftsExactlyOneBucketFromThreeIngotsAtARealBench(TestContext c){
         CompanionEntity npc=worker(c);ProjectMaterials materials=materials(npc);bench(c);
