@@ -239,6 +239,37 @@ public final class ProjectWork {
         }
         return false;
     }
+    /** Walk off a one-block support before asking gravity to lower the body.
+     * A path's usual arrival tolerance can stop with one edge still supported
+     * by the block, so this short descent must finish its physical movement. */
+    private boolean descendFromSupport(BlockPos support,double top){
+        if(!npc.isOnGround())return false;
+        BlockPos above=BlockPos.ofFloored(support.getX()+0.5,top,support.getZ()+0.5);
+        for(Direction side:Direction.Type.HORIZONTAL){
+            BlockPos landing=above.offset(side).down();
+            if(!standable(landing))continue;
+            double dx=landing.getX()+0.5-npc.getX(),dz=landing.getZ()+0.5-npc.getZ();
+            double descent=landing.getY()-npc.getY();
+            if(descent < -1.05 || descent > -0.8)continue;
+            Box sideways=npc.getBoundingBox().stretch(dx,0,dz);
+            Box downward=npc.getBoundingBox().offset(dx,descent,dz).stretch(0,-descent,0);
+            if(!world().isSpaceEmpty(npc,sideways) || !world().isSpaceEmpty(npc,downward))continue;
+            boolean safe=true;Box bounds=sideways.union(downward);
+            for(BlockPos cell:BlockPos.iterate(BlockPos.ofFloored(bounds.minX,bounds.minY+0.001,bounds.minZ),
+                    BlockPos.ofFloored(bounds.maxX-0.001,bounds.maxY-0.001,bounds.maxZ-0.001))){
+                if(!allowed(cell) || hazard(cell) || !world().getFluidState(cell).isEmpty()){
+                    safe=false;break;
+                }
+            }
+            double distance=Math.sqrt(dx*dx+dz*dz);
+            if(!safe || distance<0.1)continue;
+            resetRoute();
+            npc.getMoveControl().moveTo(landing.getX()+0.5,landing.getY(),landing.getZ()+0.5,1.05);
+            npc.setVelocity(dx/distance*0.21,npc.getVelocity().y,dz/distance*0.21);
+            return true;
+        }
+        return false;
+    }
     public boolean safeMine(BlockPos pos){
         if(!rules() || !allowed(pos))return false;
         BlockState state=world().getBlockState(pos);
@@ -256,14 +287,19 @@ public final class ProjectWork {
             Box body=npc.getBoundingBox();
             if(Math.abs(npc.getY()-top)<0.16 && body.maxX>support.minX && body.minX<support.maxX
                     && body.maxZ>support.minZ && body.minZ<support.maxZ){
-                BlockPos feet=BlockPos.ofFloored(npc.getX(),npc.getY()+0.5,npc.getZ());
+                BlockPos feet=BlockPos.ofFloored(pos.getX()+0.5,top,pos.getZ()+0.5);
                 // A one-block mound has no supported adjacent cell at its top
                 // height. Leave it through an ordinary validated step down;
                 // never remove the block while the actor is still on it.
-                for(int drop:new int[]{0,1})for(Direction side:Direction.Type.HORIZONTAL){
-                    BlockPos away=feet.offset(side).down(drop);
-                    if(standable(away)){moveTo(away);return false;}
+                for(Direction side:Direction.Type.HORIZONTAL){
+                    BlockPos away=feet.offset(side);
+                    if(standable(away)){
+                        Stance exit=new Stance(away,Vec3d.ofBottomCenter(away));
+                        if(!center(away,exit.point()) && !retaining(away,"walk"))start(away,"walk",exit);
+                        return false;
+                    }
                 }
+                descendFromSupport(pos,top);
             }
             return false;
         }

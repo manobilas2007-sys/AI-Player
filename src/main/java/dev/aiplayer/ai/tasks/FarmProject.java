@@ -57,12 +57,12 @@ public final class FarmProject {
     private final Map<Long,Integer> avoidedSources=new HashMap<>();
     private BlockPos origin,anchor,action,pendingHarvest,source,waterScanOrigin;
     private String dimension="",status="Sem plantação";
-    private boolean active,create;
+    private boolean active,create,basinPrepared;
     private Phase phase=Phase.DONE;
     private Item border=Items.OAK_LOG;
     private int cursor,completed,actionTicks,fieldCursor,scanRadius,scanEdge,waterRadius,waterEdge,waterY;
     private int nextScan,harvestSince,nextDropMove,planted;
-    private int sourceSince,waterSearchLeg;
+    private int sourceSince,waterSearchLeg,basinCursor;
     private double sourceDistance=Double.MAX_VALUE;
 
     public FarmProject(CompanionEntity npc,ProjectWork work,ProjectMaterials materials){
@@ -71,7 +71,7 @@ public final class FarmProject {
     public boolean active(){return active;}
     public String status(){return status;}
     public int progress(){return create?completed:planted;}
-    public String diagnostics(){return "phase="+phase+" cursor="+cursor+" field="+fieldCursor
+    public String diagnostics(){return "phase="+phase+" cursor="+cursor+" basin="+basinCursor+"/"+basinPrepared+" field="+fieldCursor
         +" anchor="+anchor+" source="+source+" origin="+origin+" "+status;}
     public BlockPos origin(){return origin;}
     public int knownFields(){return fields.size();}
@@ -103,7 +103,7 @@ public final class FarmProject {
         active=false;phase=Phase.DONE;origin=null;anchor=null;fields.clear();known.clear();cropSeeds.clear();avoidedSources.clear();
         action=null;pendingHarvest=null;source=null;waterScanOrigin=null;cursor=0;completed=0;fieldCursor=0;
         actionTicks=0;scanRadius=0;scanEdge=0;waterRadius=0;waterEdge=0;waterY=0;nextScan=0;planted=0;
-        sourceSince=0;sourceDistance=Double.MAX_VALUE;waterSearchLeg=0;
+        sourceSince=0;sourceDistance=Double.MAX_VALUE;waterSearchLeg=0;basinCursor=0;basinPrepared=false;
         status="Plantação cancelada";
     }
     private boolean rules(ServerWorld world){
@@ -357,8 +357,8 @@ public final class FarmProject {
         Item required=edge(pos)?border:Items.DIRT;
         BlockState wanted=edge(pos)?((net.minecraft.item.BlockItem)border).getBlock().getDefaultState():Blocks.DIRT.getDefaultState();
         if(!edge(pos) && !channel(pos) && (state.isIn(BlockTags.DIRT) || state.isOf(Blocks.FARMLAND))){cursor++;return;}
-        // Water holes are excavated when their bucket arrives, so no flowing
-        // water can invade an unfilled neighboring cell during construction.
+        // Keep the channel dry until all of its holes and paid floor supports
+        // have been prepared together, before the first bucket is poured.
         if(channel(pos)){cursor++;return;}
         if(state.isOf(wanted.getBlock()) && OwnedBlocks.get(world).owned(pos,npc.getUuid())){cursor++;return;}
         if(!state.isAir()){
@@ -415,7 +415,37 @@ public final class FarmProject {
             waterSearchLeg++;waterScanOrigin=null;
         }
     }
+    /** Prepare the whole dry channel first. Pouring into one completed cell
+     * before excavating the next would let water enter an unpaid floor gap. */
+    private boolean prepareBasins(ServerWorld world){
+        List<BlockPos> canal=channels();
+        boolean waterPresent=false,missingFloor=false;
+        for(BlockPos pos:canal){
+            if(!editAllowed(world,pos) || !world.isChunkLoaded(pos.down())){
+                status="Preservar terreno protegido durante o preparo do canal";return false;
+            }
+            waterPresent|=!world.getFluidState(pos).isEmpty();
+            missingFloor|=!world.getBlockState(pos.down()).isSolidBlock(world,pos.down());
+        }
+        if(waterPresent && missingFloor){
+            // A partially flooded older save cannot be excavated safely:
+            // preserve its real water instead of deleting it or filling fluid.
+            status="O canal antigo precisa de apoio seco antes de continuar a irrigação";return false;
+        }
+        if(basinCursor>=canal.size()){
+            basinPrepared=true;status="Bacia inteira preparada para receber água";return true;
+        }
+        BlockPos pos=canal.get(basinCursor);BlockState state=world.getBlockState(pos);
+        if(!state.isAir() && !state.isOf(Blocks.WATER)){
+            if(!prepareMining(state))return false;
+            if(!work.safeMine(pos))status=work.status();
+            return false;
+        }
+        if(!supportBelow(world,pos))return false;
+        basinCursor++;doneAction();return false;
+    }
     private void water(ServerWorld world){
+        if(!basinPrepared && !prepareBasins(world))return;
         if(cursor>=channels().size()){
             phase=Phase.PLANT;cursor=0;fieldCursor=0;
             for(int i=0;i<SIZE*SIZE;i++){BlockPos p=cell(i);if(!edge(p)&&!channel(p))fields.add(p);}
@@ -423,13 +453,12 @@ public final class FarmProject {
         }
         BlockPos pos=channels().get(cursor);
         if(stillWater(world,pos) && OwnedBlocks.get(world).owned(pos,npc.getUuid())){cursor++;return;}
-        // Prepare a watertight basin before draining a river source. An old
-        // saved layout with an air gap underneath pays for real fill here.
-        if(!world.getBlockState(pos).isAir() && !world.getBlockState(pos).isOf(Blocks.WATER)){
-            if(!prepareMining(world.getBlockState(pos)))return;
-            if(!work.safeMine(pos)){status=work.status();return;}
+        if(!editAllowed(world,pos) || !world.getBlockState(pos.down()).isSolidBlock(world,pos.down())){
+            basinPrepared=false;basinCursor=0;status="Conferir novamente o apoio do canal";return;
         }
-        if(!editAllowed(world,pos) || !supportBelow(world,pos))return;
+        if(!world.getBlockState(pos).isAir() && !world.getBlockState(pos).isOf(Blocks.WATER)){
+            basinPrepared=false;basinCursor=0;status="Preparar novamente o canal antes de buscar água";return;
+        }
         if(materials.count(Items.WATER_BUCKET)==0){
             if(!materials.ensure(Items.BUCKET,1)){status=materials.status();return;}
             findWater(world);
@@ -462,7 +491,9 @@ public final class FarmProject {
             if(!world.isChunkLoaded(neighbor)
                     || !(world.getBlockState(neighbor).isSolidBlock(world,neighbor)
                         || world.getBlockState(neighbor).isOf(Blocks.FARMLAND)
-                        || (channel(neighbor) && world.getBlockState(neighbor).isOf(Blocks.WATER)))){
+                        || (channel(neighbor) && editAllowed(world,neighbor)
+                            && (world.getBlockState(neighbor).isAir() || world.getBlockState(neighbor).isOf(Blocks.WATER))
+                            && world.getBlockState(neighbor.down()).isSolidBlock(world,neighbor.down())))){
                 status="Reparar as laterais do canal antes de colocar água";return;
             }
         }
@@ -525,6 +556,7 @@ public final class FarmProject {
         n.putString("Dimension",dimension);n.putString("Phase",phase.name());n.putString("Status",status);
         if(origin!=null)n.putLong("Origin",origin.asLong());if(anchor!=null)n.putLong("Anchor",anchor.asLong());
         n.putInt("Cursor",cursor);n.putInt("Completed",completed);n.putInt("Planted",planted);
+        n.putBoolean("BasinPrepared",basinPrepared);n.putInt("BasinCursor",basinCursor);
         n.putString("Border",Registries.ITEM.getId(border).toString());
         n.putLongArray("Fields",fields.stream().mapToLong(BlockPos::asLong).toArray());
         NbtList seeds=new NbtList();
@@ -546,6 +578,7 @@ public final class FarmProject {
         create=n.getBoolean("Create");
         try{phase=Phase.valueOf(n.getString("Phase"));}catch(IllegalArgumentException bad){return;}
         cursor=Math.max(0,Math.min(SIZE*SIZE*3,n.getInt("Cursor")));completed=Math.max(0,n.getInt("Completed"));planted=Math.max(0,n.getInt("Planted"));
+        basinPrepared=n.getBoolean("BasinPrepared");basinCursor=Math.max(0,Math.min(channels().size(),n.getInt("BasinCursor")));
         Identifier id=Identifier.tryParse(n.getString("Border"));
         if(id!=null){
             Item item=Registries.ITEM.get(id);

@@ -91,7 +91,25 @@ public class SurfaceMiningTests implements FabricGameTest {
         Item[] items={Items.OAK_LOG,Items.OAK_PLANKS,Items.STICK,Items.CRAFTING_TABLE,Items.WOODEN_PICKAXE,Items.WOODEN_AXE,Items.WOODEN_SWORD};int[] counts={4,8,8,1,1,1,1};
         for(int i=0;i<items.length;i++)a.backpack.setStack(i,new ItemStack(items[i],counts[i]));
         for(int z=0;z<8;z++)c.setBlockState(new BlockPos(5,2,z),Blocks.STONE);
-        c.runAtTick(1400,()->{c.assertTrue(owns(a,Items.STONE_PICKAXE)&&owns(a,Items.STONE_AXE)&&owns(a,Items.STONE_SWORD),"Autonomous upgrade failed"+debug(a)+" "+a.crafting().diagnostics());c.assertTrue(ResourcePlan.stoneNeeded(a)==0 && a.backpack.count(Items.COBBLESTONE)==0,"Wrong material accounting");owner.discard();c.complete();});
+        StringBuilder trace=new StringBuilder();
+        String[] previous={""};
+        c.runAtEveryTick(()->{
+            String state=a.gathering().kind()+":"+a.gathering().progress()+"/"+a.gathering().goal()
+                +":"+a.gathering().canStartAutomatic()+":"+a.intelligence().activity()+":"+ResourcePlan.stoneNeeded(a)
+                +":"+(a.owner()!=null)+":"+SurfaceStoneGathering.caveAccess(a,a.getBlockPos())
+                +":"+a.crafting().description();
+            if(!state.equals(previous[0])){
+                previous[0]=state;
+                trace.append("\n age=").append(a.age).append(" ").append(state)
+                    .append(" pos=").append(a.getPos()).append(" ownerPos=")
+                    .append(a.owner()==null?"missing":a.owner().getPos()).append(" remainingStone=")
+                    .append(java.util.stream.IntStream.range(0,8).filter(z->c.getWorld().getBlockState(
+                        c.getAbsolutePos(new BlockPos(5,2,z))).isOf(Blocks.STONE)).count())
+                    .append(" ").append(a.crafting().diagnostics())
+                    .append(" ").append(a.gathering().stoneDiagnostics(c.getAbsolutePos(new BlockPos(5,2,4))));
+            }
+        });
+        c.runAtTick(1400,()->{c.assertTrue(owns(a,Items.STONE_PICKAXE)&&owns(a,Items.STONE_AXE)&&owns(a,Items.STONE_SWORD),"Autonomous upgrade failed"+debug(a)+" "+a.crafting().diagnostics()+trace);c.assertTrue(ResourcePlan.stoneNeeded(a)==0 && a.backpack.count(Items.COBBLESTONE)==0,"Wrong material accounting");owner.discard();c.complete();});
     }
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="surface",tickLimit=1200)
     public void ownedBenchRecoveryYieldsToMissingCobblestone(TestContext c){

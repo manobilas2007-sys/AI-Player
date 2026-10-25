@@ -20,6 +20,8 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.UUID;
+import java.util.HashSet;
+import java.util.Set;
 
 /** Confirmed agricultural work uses the coordinator and real world/inventory. */
 public final class FarmProjectTests implements FabricGameTest {
@@ -139,6 +141,17 @@ public final class FarmProjectTests implements FabricGameTest {
         int count=0;for(int x=1;x<6;x++)for(int z=1;z<6;z++)if(c.getWorld().getBlockState(anchor.add(x,1,z)).isOf(Blocks.WHEAT))count++;
         return count;
     }
+    private String fieldSnapshot(TestContext c,BlockPos anchor){
+        StringBuilder result=new StringBuilder();
+        for(int x=1;x<6;x++)for(int z=1;z<6;z++){
+            BlockPos soil=anchor.add(x,0,z);
+            if(c.getWorld().getBlockState(soil.up()).isOf(Blocks.WHEAT))result.append(" wheat=").append(x).append(',').append(z);
+            else if(!c.getWorld().getBlockState(soil).isOf(Blocks.FARMLAND)
+                    && !c.getWorld().getBlockState(soil).isOf(Blocks.WATER))
+                result.append(" untilled=").append(x).append(',').append(z);
+        }
+        return result.toString();
+    }
     private void finished(TestContext c,CompanionEntity npc,BlockPos anchor,int seeds){
         c.assertFalse(npc.tasks().active(),"Farm construction did not finish: "+npc.tasks().diagnostics()+" pos="+npc.getPos());
         c.assertTrue(npc.mode()==Mode.FOLLOW,"Completed farm did not release the NPC to following mode");
@@ -147,7 +160,9 @@ public final class FarmProjectTests implements FabricGameTest {
             BlockPos water=anchor.add(3,0,z);
             c.assertTrue(c.getWorld().getBlockState(water).isOf(Blocks.WATER) && c.getWorld().getFluidState(water).isStill(),"Irrigation channel is missing a real source");
         }
-        c.assertTrue(wheat(c,anchor)==seeds && count(npc,Items.WHEAT_SEEDS)==0,"Farm did not plant exactly the supplied seeds");
+        c.assertTrue(wheat(c,anchor)==seeds && count(npc,Items.WHEAT_SEEDS)==0,
+            "Farm did not plant exactly the real supplied/collected seeds: expected="+seeds+" wheat="+wheat(c,anchor)
+                +" seedsRemaining="+count(npc,Items.WHEAT_SEEDS)+" "+npc.tasks().diagnostics()+fieldSnapshot(c,anchor));
         for(int x:new int[]{8,11,14})c.assertFalse(c.getWorld().getBlockState(c.getAbsolutePos(new BlockPos(x,1,12))).isOf(Blocks.WATER),
             "A destination source was created without draining its river source");
     }
@@ -202,8 +217,21 @@ public final class FarmProjectTests implements FabricGameTest {
         npc.backpack.setStack(2,new ItemStack(Items.BUCKET));npc.backpack.setStack(3,new ItemStack(Items.IRON_HOE));
         npc.backpack.setStack(4,new ItemStack(Items.WHEAT_SEEDS,4));
         npc.tasks().startAt(CompanionTasks.Kind.CREATE_FARM,origin,null);
+        // Vanilla grass can really drop an additional wheat seed. Observe
+        // that physical loot before planting; it is not an invented input.
+        Set<UUID> grassDrops=new HashSet<>();int[] grassSeeds={0};
+        c.runAtEveryTick(()->{
+            if(wheat(c,anchor)>0)return;
+            for(ItemEntity drop:c.getWorld().getEntitiesByClass(ItemEntity.class,new Box(anchor.add(2,1,1)).expand(3),
+                    e->e.isAlive() && e.getStack().isOf(Items.WHEAT_SEEDS)
+                        && e.getCommandTags().contains("aiplayer_drop_"+npc.getUuid())))
+                if(grassDrops.add(drop.getUuid()))grassSeeds[0]+=drop.getStack().getCount();
+        });
         c.runAtTick(2500,()->{
-            finished(c,npc,anchor,4);
+            int uncollected=c.getWorld().getEntitiesByClass(ItemEntity.class,new Box(anchor).expand(10),
+                e->e.isAlive() && grassDrops.contains(e.getUuid())).stream().mapToInt(e->e.getStack().getCount()).sum();
+            c.assertTrue(grassSeeds[0]<=1,"A single grass block produced impossible extra seed inputs");
+            finished(c,npc,anchor,4+grassSeeds[0]-uncollected);
             for(int x=0;x<7;x++)for(int z=0;z<7;z++)if(x==0||x==6||z==0||z==6)
                 c.assertTrue(c.getWorld().getBlockState(anchor.add(x,0,z)).isOf(Blocks.SPRUCE_LOG),"Farm mixed or fabricated its wood border");
             c.assertTrue(count(npc,Items.SPRUCE_LOG)==0,"Farm border did not consume exactly 24 logs");c.complete();

@@ -157,7 +157,8 @@ public final class ResourceGathering {
     }
     public String pillarDiagnostics(){return pillar.diagnostics();}
     /** Diagnostics for real stone targeting, retained across executor ticks. */
-    public String stoneDiagnostics(BlockPos p){return stone.diagnostics(p)+" scan="+stone.scanDiagnostics();}
+    public String stoneDiagnostics(BlockPos p){return stone.diagnostics(p)+" scan="+stone.scanDiagnostics()
+        +" job="+kind+" "+gathered+"/"+desired+" lastAction="+lastAction+" paused="+pausedAt+" idleCooldown="+idleCooldown;}
     public boolean active() {return kind!=Kind.NONE;}
     public boolean cleanupReady(){
         return cleaning && (pillar.active() ? pillar.cleanupReady()

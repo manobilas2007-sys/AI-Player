@@ -83,8 +83,15 @@ public final class ProjectMaterials {
     public void pause(){mining.reset();npc.clearWorkingVisual();}
     public void cancel(){
         pause();target=null;scanFor=null;miningFor=null;crafting=null;craftTicks=0;
-        worksite=null;
+        // Stations belong to the cancelled project, not to every future job.
+        // Keeping an old preferred site can route the next build back to a
+        // distant farm instead of creating its own nearby workbench/furnace.
+        furnace=null;bench=null;preferredFurnace=null;preferredBench=null;
+        worksite=null;dimension="";scanOrigin=null;
+        scanRadius=0;scanY=0;scanEdge=0;scans=0;searchAt=0;targetSince=0;nextRoute=0;
+        bestTargetDistance=Double.MAX_VALUE;dropProgressAt=0;
         dropTarget=null;bestDropDistance=Double.MAX_VALUE;avoidedDrops.clear();lastEnsure=-1;
+        status="Conferir materiais do projeto";
     }
 
     /** Advance at most one dependency leaf per call. True always means actual

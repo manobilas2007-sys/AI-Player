@@ -98,6 +98,55 @@ public final class ProjectMaterialsTests implements FabricGameTest {
         });
     }
 
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=520)
+    public void cancelledProjectUsesNewLocalStationsInsteadOfItsOldFarm(TestContext c){
+        CompanionEntity npc=worker(c);ProjectMaterials materials=materials(npc);
+        BlockPos oldBench=c.getAbsolutePos(new BlockPos(25,2,27));
+        BlockPos oldFurnace=c.getAbsolutePos(new BlockPos(25,2,25));
+        c.getWorld().setBlockState(oldBench,Blocks.CRAFTING_TABLE.getDefaultState());
+        c.getWorld().setBlockState(oldFurnace,Blocks.FURNACE.getDefaultState());
+        OwnedBlocks.get(c.getWorld()).claim(oldBench,npc.getUuid());
+        OwnedBlocks.get(c.getWorld()).claim(oldFurnace,npc.getUuid());
+        NbtCompound previous=new NbtCompound(),saved=new NbtCompound();
+        previous.putString("Dimension",c.getWorld().getRegistryKey().getValue().toString());
+        previous.putString("Log","minecraft:oak_log");previous.putString("Planks","minecraft:oak_planks");
+        previous.putLong("Bench",oldBench.asLong());previous.putLong("Furnace",oldFurnace.asLong());
+        previous.putLong("PreferredBench",oldBench.asLong());previous.putLong("PreferredFurnace",oldFurnace.asLong());
+        saved.put("ProjectMaterials",previous);materials.readNbt(saved);
+        materials.pause();NbtCompound paused=new NbtCompound();materials.writeNbt(paused);
+        c.assertTrue(paused.getCompound("ProjectMaterials").getLong("Bench")==oldBench.asLong()
+            && paused.getCompound("ProjectMaterials").getLong("Furnace")==oldFurnace.asLong(),
+            "Pausing a saved project discarded its existing stations");
+
+        materials.cancel();
+        BlockPos nextBench=c.getAbsolutePos(new BlockPos(3,2,6));
+        BlockPos nextFurnace=c.getAbsolutePos(new BlockPos(5,2,4));
+        materials.preferWorkbench(nextBench);materials.preferFurnace(nextFurnace);
+        npc.backpack.setStack(0,new ItemStack(Items.IRON_INGOT,2));
+        npc.backpack.setStack(1,new ItemStack(Items.RAW_IRON));
+        npc.backpack.setStack(2,new ItemStack(Items.COAL));
+        npc.backpack.setStack(3,new ItemStack(Items.OAK_PLANKS,4));
+        npc.backpack.setStack(4,new ItemStack(Items.COBBLESTONE,8));
+        c.runAtEveryTick(()->materials.ensure(Items.BUCKET,1));
+        c.runAtTick(420,()->{
+            c.assertTrue(materials.count(Items.BUCKET)==1,"New project stalled at previous stations: "+materials.status());
+            c.assertTrue(c.getWorld().getBlockState(nextBench).isOf(Blocks.CRAFTING_TABLE)
+                && c.getWorld().getBlockEntity(nextFurnace) instanceof FurnaceBlockEntity,
+                "New project reused a distant station instead of placing its local stations");
+            c.assertTrue(OwnedBlocks.get(c.getWorld()).owned(nextBench,npc.getUuid())
+                && OwnedBlocks.get(c.getWorld()).owned(nextFurnace,npc.getUuid()),
+                "New local stations were not real owned project blocks");
+            c.assertTrue(materials.count(Items.IRON_INGOT)==0 && materials.count(Items.RAW_IRON)==0
+                && materials.count(Items.COAL)==0 && materials.count(Items.OAK_PLANKS)==0
+                && materials.count(Items.COBBLESTONE)==0,"Restarted project did not conserve its real recipe inputs");
+            FurnaceBlockEntity untouched=(FurnaceBlockEntity)c.getWorld().getBlockEntity(oldFurnace);
+            c.assertTrue(c.getWorld().getBlockState(oldBench).isOf(Blocks.CRAFTING_TABLE)
+                && untouched!=null && untouched.getStack(0).isEmpty() && untouched.getStack(1).isEmpty()
+                && untouched.getStack(2).isEmpty(),"Cancelled project stations were changed by the next project");
+            c.complete();
+        });
+    }
+
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=340)
     public void glassComesFromSandCookedInAVanillaFurnace(TestContext c){
         CompanionEntity npc=worker(c);ProjectMaterials materials=materials(npc);furnace(c,npc,materials);

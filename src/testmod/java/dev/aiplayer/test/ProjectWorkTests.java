@@ -178,6 +178,10 @@ public final class ProjectWorkTests implements FabricGameTest {
             if(c.getWorld().getBlockState(mound).isAir()){
                 c.assertTrue(npc.getPos().squaredDistanceTo(start)>0.25,
                     "Builder removed its support before physically moving off the mound");
+                Box body=npc.getBoundingBox();
+                c.assertTrue(body.maxX<=mound.getX() || body.minX>=mound.getX()+1
+                    || body.maxZ<=mound.getZ() || body.minZ>=mound.getZ()+1,
+                    "Builder removed the mound while part of its body still overlapped the support");
             }
         });
         c.runAtTick(180,()->{
