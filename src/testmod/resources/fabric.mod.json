@@ -10,7 +10,9 @@
       "dev.aiplayer.test.SurfaceMiningTests",
       "dev.aiplayer.test.WorldRegressionTests",
       "dev.aiplayer.test.ExcavationTests",
-      "dev.aiplayer.test.FallingTreeTests"
+      "dev.aiplayer.test.FallingTreeTests",
+      "dev.aiplayer.test.BaritoneNavigationTests",
+      "dev.aiplayer.test.CompanionTaskTests"
     ]
   },
   "depends": {

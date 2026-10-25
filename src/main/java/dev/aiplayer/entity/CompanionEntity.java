@@ -56,6 +56,8 @@ public class CompanionEntity extends PathAwareEntity implements ExtendedScreenHa
     private final SurvivalController survival = new SurvivalController(this);
     private final ResourceGathering gathering = new ResourceGathering(this);
     private final StarterCrafting crafting = new StarterCrafting(this);
+    private final dev.aiplayer.ai.tasks.CompanionTasks tasks = new dev.aiplayer.ai.tasks.CompanionTasks(this);
+    public dev.aiplayer.ai.tasks.CompanionTasks tasks(){return tasks;}
     private LivingEntity ownerMarkedTarget;
     private int ownerMarkExpires;
     private boolean retreating;
@@ -234,7 +236,7 @@ public class CompanionEntity extends PathAwareEntity implements ExtendedScreenHa
             NbtCompound item=new NbtCompound(); item.putByte("Slot",(byte)i); backpack.getStack(i).writeNbt(item); items.add(item);
         }
         nbt.putString("WorkDimension",getWorld().getRegistryKey().getValue().toString());
-        nbt.put("Backpack",items); gathering.writeNbt(nbt); crafting.writeNbt(nbt); intelligence.write(nbt);survival.writeNbt(nbt);speech.write(nbt);nbt.putInt("AIPlayerDataVersion",5);
+        nbt.put("Backpack",items); gathering.writeNbt(nbt); crafting.writeNbt(nbt); tasks.writeNbt(nbt);intelligence.write(nbt);survival.writeNbt(nbt);speech.write(nbt);nbt.putInt("AIPlayerDataVersion",6);
     }
     @Override public void readCustomDataFromNbt(NbtCompound nbt) {
         super.readCustomDataFromNbt(nbt);
@@ -249,8 +251,8 @@ public class CompanionEntity extends PathAwareEntity implements ExtendedScreenHa
         for(int i=0;i<list.size();i++) { NbtCompound item=list.getCompound(i);int slot=item.getByte("Slot")&255;
             if(slot<27) backpack.setStack(slot,ItemStack.fromNbt(item)); }
         if(!nbt.contains("WorkDimension") || nbt.getString("WorkDimension").equals(getWorld().getRegistryKey().getValue().toString())){
-            gathering.readNbt(nbt);crafting.readNbt(nbt);
-        } else {gathering.readNbt(new NbtCompound());crafting.readNbt(new NbtCompound());}
+            gathering.readNbt(nbt);crafting.readNbt(nbt);tasks.readNbt(nbt);
+        } else {gathering.readNbt(new NbtCompound());crafting.readNbt(new NbtCompound());tasks.readNbt(new NbtCompound());}
         intelligence.read(nbt);survival.readNbt(nbt);speech.read(nbt);
     }
     @Override public void writeScreenOpeningData(ServerPlayerEntity player,PacketByteBuf buf) { buf.writeInt(getId()); }

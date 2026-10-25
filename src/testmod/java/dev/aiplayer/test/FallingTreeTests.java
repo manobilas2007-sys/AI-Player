@@ -126,5 +126,84 @@ public final class FallingTreeTests implements FabricGameTest {
             c.complete();
         });
     }
+    /** FCL regression: the table item was already recovered, but the old
+     * reclamation session still existed when the axe became unusable. Missing
+     * future stone upgrades must not block replacement during a WOOD order. */
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="fallingtree",tickLimit=400)
+    public void replacesWornAxeDuringWoodOrderAfterBenchPickup(TestContext c) {
+        CompanionEntity a=worker(c);a.autoCraft=true;a.autoEquip=true;
+        ItemStack worn=new ItemStack(Items.WOODEN_AXE);worn.setDamage(worn.getMaxDamage()-2);
+        a.backpack.setStack(0,worn);
+        a.backpack.setStack(1,new ItemStack(Items.STICK,11));
+        a.backpack.setStack(2,new ItemStack(Items.WOODEN_PICKAXE));
+        a.backpack.setStack(3,new ItemStack(Items.CRAFTING_TABLE));
+        a.backpack.setStack(4,new ItemStack(Items.SPRUCE_LOG,55));
+        a.equipStack(EquipmentSlot.MAINHAND,new ItemStack(Items.WOODEN_SWORD));
+        BlockPos oldBench=c.getAbsolutePos(new BlockPos(3,2,2));
+        c.getWorld().setBlockState(oldBench,Blocks.AIR.getDefaultState());
+        NbtCompound saved=new NbtCompound();saved.putLong("OwnedBench",oldBench.asLong());
+        a.crafting().readNbt(saved);
+        c.assertTrue(a.crafting().isReclaiming(),"Fixture lacks pending bench reclamation");
+        c.assertTrue(ResourcePlan.stoneNeeded(a)>0,"Fixture lacks future stone upgrades");
+        BlockPos base=tree(c,a);
+        NbtCompound task=a.gathering().taskSnapshot();
+        task.getCompound("GatherTask").putInt("Desired",50);a.gathering().readNbt(task);
+        c.runAtTick(20,()->{
+            c.assertTrue(java.util.stream.IntStream.range(0,a.backpack.size()).anyMatch(i->a.backpack.getStack(i)==worn),"Worn axe discarded before replacement recipe");
+            c.assertTrue(a.gathering().isManual() && a.gathering().goal()==50,
+                "Axe maintenance lost manual wood quantity");
+            c.assertTrue(a.gathering().progress()==0 && c.getWorld().getBlockState(base).isOf(Blocks.OAK_LOG),
+                "Continued bare-handed wood mining before replacing axe");
+        });
+        c.runAtTick(240,()->{
+            c.assertTrue(ResourcePlan.usable(a,AxeItem.class),
+                "Bench recovery blocked axe renewal during wood order: "+a.intelligence().status()
+                    +" crafting="+a.crafting().diagnostics());
+            for(int i=0;i<a.backpack.size();i++)c.assertFalse(
+                a.backpack.getStack(i).getItem() instanceof AxeItem && ResourcePlan.worn(a.backpack.getStack(i)),
+                "Worn axe kept after real replacement");
+            c.assertTrue(a.gathering().isManual() && a.gathering().goal()==50 && a.gathering().progress()>0,
+                "Wood order did not resume with its original quantity: "+a.intelligence().status());
+            c.complete();
+        });
+    }
+    /** Same inventory as the FCL report, after WOOD has finished. An absent
+     * owned table must finish its stale recovery even outside a cave. */
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="fallingtree",tickLimit=650)
+    public void replacesWornAxeAfterWoodOrderAndBenchPickup(TestContext c) {
+        CompanionEntity a=worker(c);a.autoCraft=true;a.autoEquip=true;
+        var owner=c.createMockCreativeServerPlayerInWorld();
+        Vec3d away=Vec3d.ofBottomCenter(c.getAbsolutePos(new BlockPos(22,2,2)));
+        owner.refreshPositionAndAngles(away.x,away.y,away.z,0,0);
+        NbtCompound ownerData=new NbtCompound();a.writeCustomDataToNbt(ownerData);
+        ownerData.putUuid("Owner",owner.getUuid());a.readCustomDataFromNbt(ownerData);
+        a.setMode(Mode.GUARD);
+        ItemStack worn=new ItemStack(Items.WOODEN_AXE);worn.setDamage(worn.getMaxDamage()-2);
+        a.backpack.setStack(0,worn);
+        a.backpack.setStack(1,new ItemStack(Items.STICK,11));
+        a.backpack.setStack(2,new ItemStack(Items.WOODEN_PICKAXE));
+        a.backpack.setStack(3,new ItemStack(Items.CRAFTING_TABLE));
+        a.backpack.setStack(4,new ItemStack(Items.SPRUCE_LOG,55));
+        a.equipStack(EquipmentSlot.MAINHAND,new ItemStack(Items.WOODEN_SWORD));
+        BlockPos oldBench=c.getAbsolutePos(new BlockPos(3,2,2));
+        c.getWorld().setBlockState(oldBench,Blocks.AIR.getDefaultState());
+        NbtCompound saved=new NbtCompound();saved.putLong("OwnedBench",oldBench.asLong());
+        a.crafting().readNbt(saved);
+        c.assertTrue(a.crafting().isReclaiming() && !a.gathering().active(),
+            "Fixture lacks the pending post-order bench session");
+        c.assertFalse(SurfaceStoneGathering.caveAccess(a,a.getBlockPos()),"Fixture is inside a cave");
+        c.runAtTick(20,()->c.assertTrue(java.util.stream.IntStream.range(0,a.backpack.size()).anyMatch(i->a.backpack.getStack(i)==worn),
+            "Worn axe discarded before replacement recipe"));
+        c.runAtTick(550,()->{
+            c.assertTrue(ResourcePlan.usable(a,AxeItem.class),
+                "Finished wood order left a worn axe forever: "+a.intelligence().status()
+                    +" crafting="+a.crafting().diagnostics());
+            for(int i=0;i<a.backpack.size();i++)c.assertFalse(
+                a.backpack.getStack(i).getItem() instanceof AxeItem && ResourcePlan.worn(a.backpack.getStack(i)),
+                "Worn axe kept after real replacement");
+            c.assertTrue(a.backpack.count(Items.SPRUCE_LOG)<55,"Replacement consumed no real wood");
+            owner.discard();c.complete();
+        });
+    }
 
 }

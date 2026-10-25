@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "aiplayer_runtime_smoke",
+  "version": "1.0.0",
+  "name": "AI Player packaged runtime smoke test",
+  "environment": "server",
+  "entrypoints": { "main": ["dev.aiplayer.test.PackagedRuntimeSmoke"] },
+  "depends": {
+    "aiplayer": "*",
+    "fabric-api": "*",
+    "minecraft": "1.20.1",
+    "java": ">=17"
+  }
+}

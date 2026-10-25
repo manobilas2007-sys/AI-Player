@@ -21,8 +21,20 @@ jobs:
 
       - name: Compilar Minecraft Fabric 1.20.1
         run: |
-          bash gradlew clean build --no-daemon
+          bash gradlew clean :embedded-baritone:build build --no-daemon
 
+      - name: Verificar biblioteca incorporada
+        run: python3 tools/check_embedded_baritone.py
+
+      - name: Record corresponding source revision
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import os, subprocess
+          revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          repo = os.environ['GITHUB_REPOSITORY']
+          Path('SOURCE_REVISION.txt').write_text(f'Repository: https://github.com/{repo}\nCommit: {revision}\nSource: https://github.com/{repo}/tree/{revision}\nBaritone upstream: 8c55ad0721d42a01a359834edc16aaa9b5bc587d\n')
+          PYCODE
       - name: Preparar JAR
         run: |
           mkdir -p dist
@@ -40,6 +52,16 @@ jobs:
       - name: Disponibilizar JAR
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Player-v0.4.1-JAR
-          path: dist/*.jar
+          name: AI-Player-v0.5.1-FCL-fix-JAR-and-sources
+          path: |
+            dist/*.jar
+            build/libs/*-sources.jar
+            embedded-baritone/build/libs/*.jar
+            embedded-baritone/build.gradle
+            build.gradle
+            settings.gradle
+            LICENSE.md
+            SOURCE_REVISION.txt
+            third-party/Baritone/
+            docs/INTEGRACAO_BARITONE.md
           if-no-files-found: error

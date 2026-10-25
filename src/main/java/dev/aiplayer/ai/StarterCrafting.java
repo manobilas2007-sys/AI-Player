@@ -198,6 +198,15 @@ public final class StarterCrafting {
             if(count(Items.COBBLESTONE)>=3)return recipe(Items.STONE_AXE,Items.COBBLESTONE,3,2);
             if(plank!=null && count(plank)>=3)return recipe(Items.WOODEN_AXE,plank,3,2);
         }
+        // A farming order may request a real hoe; the same bench and resource
+        // checks apply as for the existing tools. Seeds are never synthesized.
+        if(npc.tasks().active() && npc.tasks().kind()==dev.aiplayer.ai.tasks.CompanionTasks.Kind.FARM
+                && !dev.aiplayer.ai.brain.ResourcePlan.usable(npc,HoeItem.class) && count(Items.STICK)>=2){
+            if(count(Items.DIAMOND)>=2)return recipe(Items.DIAMOND_HOE,Items.DIAMOND,2,2);
+            if(count(Items.IRON_INGOT)>=2)return recipe(Items.IRON_HOE,Items.IRON_INGOT,2,2);
+            if(count(Items.COBBLESTONE)>=2)return recipe(Items.STONE_HOE,Items.COBBLESTONE,2,2);
+            if(plank!=null && count(plank)>=2)return recipe(Items.WOODEN_HOE,plank,2,2);
+        }
         Recipe r=tryTools(Items.DIAMOND,4,Items.DIAMOND_PICKAXE,Items.DIAMOND_AXE,Items.DIAMOND_SWORD);
         if(r!=null)return r;
         r=tryTools(Items.IRON_INGOT,3,Items.IRON_PICKAXE,Items.IRON_AXE,Items.IRON_SWORD);

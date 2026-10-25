@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
 
 /** A small offline command parser, not a generative language model. */
 public final class PortugueseOrderParser {
-    public enum Action { WOOD, FOOD, STONE, CANCEL, NONE }
+    public enum Action { WOOD, FOOD, STONE, CANCEL, NONE, BUILD_SHELTER, FARM, EXPLORE }
     public record Order(Action action, int amount) {}
     private static final Pattern DIGITS = Pattern.compile("(?<![0-9])([0-9]{1,4})(?![0-9])");
     private PortugueseOrderParser() {}
@@ -47,6 +47,17 @@ public final class PortugueseOrderParser {
         boolean cancel=containsAny(words,"cancelar","cancela","pare","parar","interromper","desista");
         if(cancel && containsAny(words,"tarefa","coleta","madeira","troncos","trabalho","ordem","buscar","pegar","pedra","pedregulho","mineracao"))
             return new Order(Action.CANCEL,0);
+        if(cancel && text.matches(".*\\b(abrigo|cabana|casa|plantacao|plantio|trigo|exploracao|projeto)\\b.*"))
+            return new Order(Action.CANCEL,0);
+        boolean build=text.matches(".*\\b(construa|construir|constroi|construam)\\b.*")
+            && text.matches(".*\\b(abrigo|cabana|casa)\\b.*");
+        boolean farm=text.matches(".*\\b(plante|plantar|cultive|cultivar)\\b.*")
+            && text.matches(".*\\b(trigo|sementes|plantacao|fazenda)\\b.*");
+        boolean explore=text.matches(".*\\b(explore|explorar|explora)\\b.*");
+        int projects=(build?1:0)+(farm?1:0)+(explore?1:0);
+        if(projects>1)return new Order(Action.NONE,0);
+        if(projects==1 && text.matches(".*\\b(pegar|pegue|colete|coleta|minere|minerar|traga)\\b.*"))return new Order(Action.NONE,0);
+        if(projects==1)return new Order(build?Action.BUILD_SHELTER:farm?Action.FARM:Action.EXPLORE,1);
         boolean wood=containsAny(words,"madeira","madeiras","tronco","troncos","tora","toras","arvore","arvores","lenha");
         boolean food=containsAny(words,"comida","alimento","alimentos","carne","carnes");
         boolean stone=containsAny(words,"pedra","pedras","pedregulho","pedregulhos","rocha","rochas","cobble","cobblestone");

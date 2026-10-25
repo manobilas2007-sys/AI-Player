@@ -1,0 +1,33 @@
+plugins { id 'java-library' }
+group = 'dev.aiplayer'
+version = '1.10.5-npc.1'
+base { archivesName = 'ai-player-baritone-core' }
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    withSourcesJar()
+}
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+    options.encoding = 'UTF-8'
+}
+tasks.register('coreTest', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.aiplayer.baritone.CoreTest'
+}
+tasks.named('check') { dependsOn tasks.named('coreTest') }
+tasks.named('processResources') {
+    from(rootProject.file('third-party/Baritone')) { into 'META-INF/licenses/baritone' }
+    from('UPSTREAM.md') { into 'META-INF/licenses/baritone'; rename { 'ADAPTATION.md' } }
+}
+tasks.named('sourcesJar') {
+    from('UPSTREAM.md')
+    from('upstream') { into 'upstream' }
+}
+tasks.named('jar') {
+    manifest { attributes('Implementation-Title': 'AI Player embedded Baritone core',
+        'Implementation-Version': project.version,
+        'Implementation-Vendor': 'Baritone contributors; AI Player adaptations',
+        'Automatic-Module-Name': 'dev.aiplayer.baritone') }
+}
