@@ -145,6 +145,7 @@ public class CompanionEntity extends PathAwareEntity implements ExtendedScreenHa
         if(!getWorld().isClient && isAlive()) {
             if(age-lastWorkTick>2 || getTarget()!=null || menuOpen() || isEating())dataTracker.set(WORKING,false);
             intelligence.tick();
+            dev.aiplayer.ai.navigation.OwnedDoorNavigation.tick(this);
         }
     }
     public void optimizeEquipment() {

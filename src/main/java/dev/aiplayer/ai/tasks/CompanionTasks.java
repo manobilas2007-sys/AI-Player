@@ -45,11 +45,16 @@ import java.util.List;
  * the world remotely: every build, recipe, till, plant and harvest is executed
  * in reach, on the server thread, using the real inventory and ownership ledger. */
 public final class CompanionTasks {
-    public enum Kind { NONE, BUILD_SHELTER, FARM, EXPLORE }
+    // Legacy kinds remain readable so projects saved by 0.5.x can finish.
+    public enum Kind { NONE, BUILD_SHELTER, FARM, EXPLORE, BUILD_HOUSE, CREATE_FARM, TEND_FARM }
     private static final int BUILD_DELAY=6, FARM_DELAY=12, CRAFT_DELAY=12;
     private static final int[][] EXPLORE_OFFSETS={{8,0},{6,6},{0,8},{-6,6},{-8,0},{-6,-6},{0,-8},{6,-6}};
     private final CompanionEntity npc;
     private final PhysicalMining mining;
+    private final ProjectWork projectWork;
+    private final ProjectMaterials materials;
+    private final HouseProject house;
+    private final FarmProject farmProject;
     private Kind kind=Kind.NONE;
     private BlockPos anchor, actionTarget, pendingHarvest, routeTarget, routeAction;
     private Vec3d routePosition, routePoint;
@@ -60,20 +65,43 @@ public final class CompanionTasks {
     private Item plankSource;
     private final List<BlockPos> fields=new ArrayList<>();
 
-    public CompanionTasks(CompanionEntity npc){this.npc=npc;mining=new PhysicalMining(npc);}
+    public CompanionTasks(CompanionEntity npc){
+        this.npc=npc;mining=new PhysicalMining(npc);
+        projectWork=new ProjectWork(npc);materials=new ProjectMaterials(npc,projectWork);
+        house=new HouseProject(npc,projectWork,materials);farmProject=new FarmProject(npc,projectWork,materials);
+    }
     public boolean active(){return kind!=Kind.NONE;}
     public Kind kind(){return kind;}
-    public String status(){return status;}
+    public boolean advancedActive(){return kind==Kind.BUILD_HOUSE || kind==Kind.CREATE_FARM || kind==Kind.TEND_FARM;}
+    public String status(){return kind==Kind.BUILD_HOUSE?house.status():kind==Kind.CREATE_FARM || kind==Kind.TEND_FARM?farmProject.status():status;}
     public String diagnostics(){
+        if(advancedActive())return kind+" progress="+progress()+" "+status()+" work="+projectWork.status()+" materials="+materials.status()
+            +(kind==Kind.BUILD_HOUSE?" "+house.diagnostics():"");
         Path path=npc.getNavigation().getCurrentPath();
         return "index="+index+" anchor="+anchor+" action="+actionTarget+" stance="+routeTarget
             +" point="+routePoint+" inside="+builderPositioned+" idle="+npc.getNavigation().isIdle()
             +" path="+(path==null?"none":path.getCurrentNodeIndex()+"/"+path.getLength()+" end="+path.getEnd())
             +" "+NpcPathfinder.diagnostics(npc);
     }
-    public int progress(){return kind==Kind.EXPLORE?explored:index;}
+    public int progress(){return kind==Kind.BUILD_HOUSE?house.progress():kind==Kind.CREATE_FARM || kind==Kind.TEND_FARM?farmProject.progress():kind==Kind.EXPLORE?explored:index;}
+
+    /** The confirmed order keeps its original site even if the owner moves
+     * while choosing a layout or answering the NPC. */
+    public void startAt(Kind requested,BlockPos origin,Item preferredPlanks){
+        if(requested!=Kind.BUILD_HOUSE && requested!=Kind.CREATE_FARM && requested!=Kind.TEND_FARM){start(requested);return;}
+        cancel();
+        if(origin==null || !(npc.getWorld() instanceof ServerWorld world) || !world.isChunkLoaded(origin))return;
+        npc.gathering().cancel();npc.intelligence().clearSuspended();
+        kind=requested;anchor=origin.toImmutable();dimension=world.getRegistryKey().getValue().toString();
+        if(kind==Kind.BUILD_HOUSE)house.start(anchor,preferredPlanks);
+        else farmProject.start(kind==Kind.CREATE_FARM,anchor);
+        status=status();
+    }
 
     public void start(Kind requested){
+        if(requested==Kind.BUILD_HOUSE || requested==Kind.CREATE_FARM || requested==Kind.TEND_FARM){
+            startAt(requested,npc.getBlockPos(),null);return;
+        }
         cancel();
         if(requested==Kind.NONE || !(npc.getWorld() instanceof ServerWorld))return;
         npc.gathering().cancel();
@@ -84,6 +112,7 @@ public final class CompanionTasks {
         status=switch(kind){case BUILD_SHELTER->"Planejar abrigo de madeira";case FARM->"Procurar solo irrigado";case EXPLORE->"Explorar oito locais carregados";default->"Sem projeto";};
     }
     public void cancel(){
+        house.cancel();farmProject.cancel();materials.cancel();projectWork.cancel();
         if(gatheringWood){npc.gathering().cancel();gatheringWood=false;}
         mining.reset();npc.getNavigation().stop();
         kind=Kind.NONE;anchor=null;fields.clear();actionTarget=null;pendingHarvest=null;actionTicks=0;plankSource=null;
@@ -91,6 +120,7 @@ public final class CompanionTasks {
         index=0;explored=0;routeFailures=0;status="Projeto cancelado";
     }
     public void pause(){
+        if(advancedActive()){house.pause();farmProject.pause();materials.pause();projectWork.pause();}
         mining.reset();
         if(gatheringWood)npc.gathering().pause();
         routeTarget=null;routeAction=null;routePosition=null;routePoint=null;
@@ -100,6 +130,18 @@ public final class CompanionTasks {
         if(!active() || npc.ownerId()==null || !(npc.getWorld() instanceof ServerWorld world))return;
         if(!dimension.equals(world.getRegistryKey().getValue().toString())){cancel();status="Projeto cancelado: dimensão alterada";return;}
         if(npc.menuOpen() || npc.isEating() || npc.getTarget()!=null){pause();return;}
+        if(advancedActive()){
+            Kind executing=kind;
+            if(kind==Kind.BUILD_HOUSE)house.tick();else farmProject.tick();
+            status=status();
+            if(!(executing==Kind.BUILD_HOUSE?house.active():farmProject.active())){
+                kind=Kind.NONE;projectWork.pause();
+                npc.intelligence().memory().succeeded(status);
+                if(executing==Kind.CREATE_FARM)npc.setMode(dev.aiplayer.ai.Mode.FOLLOW);
+                if(npc.owner()!=null)npc.owner().sendMessage(net.minecraft.text.Text.literal("[AI Player] "+status),false);
+            }
+            return;
+        }
         if(npc.age<retryAt)return;
         if(gatheringWood){
             if(npc.gathering().active()){
@@ -541,8 +583,12 @@ public final class CompanionTasks {
         if(pendingHarvest!=null)n.putLong("PendingHarvest",pendingHarvest.asLong());
         n.putLongArray("Fields",fields.stream().mapToLong(BlockPos::asLong).toArray());
         root.put("CompanionProject",n);
+        if(advancedActive()){
+            house.writeNbt(root);farmProject.writeNbt(root);materials.writeNbt(root);
+        }
     }
     public void readNbt(NbtCompound root){
+        house.cancel();farmProject.cancel();materials.cancel();projectWork.cancel();
         kind=Kind.NONE;anchor=null;pendingHarvest=null;fields.clear();actionDone();gatheringWood=false;
         routePosition=null;builderPositioned=false;mining.reset();
         if(!root.contains("CompanionProject"))return;
@@ -553,7 +599,12 @@ public final class CompanionTasks {
             kind=Kind.NONE;status="Projeto não restaurado nesta dimensão";return;
         }
         anchor=BlockPos.fromLong(n.getLong("Anchor"));
-        if(anchor.getSquaredDistance(npc.getBlockPos())>48*48){kind=Kind.NONE;status="Projeto distante; aguardar nova ordem";return;}
+        if(anchor.getSquaredDistance(npc.getBlockPos())>(advancedActive()?128*128:48*48)){kind=Kind.NONE;status="Projeto distante; aguardar nova ordem";return;}
+        if(advancedActive()){
+            materials.readNbt(root);house.readNbt(root);farmProject.readNbt(root);
+            if(!(kind==Kind.BUILD_HOUSE?house.active():farmProject.active()))kind=Kind.NONE;
+            status=status();return;
+        }
         index=Math.max(0,Math.min(kind==Kind.BUILD_SHELTER?80:kind==Kind.EXPLORE?8:9,n.getInt("Index")));
         // Older in-progress blueprints used a different placement order. Scan
         // them again; already owned blocks are retained and consume no items.

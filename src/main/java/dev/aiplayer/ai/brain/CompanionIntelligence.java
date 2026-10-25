@@ -20,6 +20,7 @@ public final class CompanionIntelligence {
     private final BrainMemory memory=new BrainMemory();
     private final NavigationMonitor navigation;
     private final TerrainRecovery recovery;
+    private final AutonomousSurvey survey;
     private DecisionPolicy.Activity activity=IDLE;
     private ResourcePlan plan=new ResourcePlan(0,0,false,4,false);
     private NbtCompound suspendedJob,materialJob;
@@ -33,7 +34,7 @@ public final class CompanionIntelligence {
     private final Map<UUID,Integer> unreachableEnemies=new HashMap<>();
     private boolean following, craftAvailable;
     private long lastHurt, nextEmergencyFoodAt,nextMaterialAt;
-    public CompanionIntelligence(CompanionEntity npc){this.npc=npc;navigation=new NavigationMonitor(npc);recovery=new TerrainRecovery(npc);}
+    public CompanionIntelligence(CompanionEntity npc){this.npc=npc;navigation=new NavigationMonitor(npc);recovery=new TerrainRecovery(npc);survey=new AutonomousSurvey(npc);}
     public BrainMemory memory(){return memory;}
     public DecisionPolicy.Activity activity(){return activity;}
     public ResourcePlan plan(){return plan;}
@@ -73,6 +74,7 @@ public final class CompanionIntelligence {
         memory.dimension(npc.getWorld().getRegistryKey().getValue().toString());
         if(npc.age%100==0)memory.expire(now);
         PlayerEntity owner=npc.owner();
+        if(owner!=null && !npc.menuOpen())survey.observe();
         scan(owner);
         npc.survival().tick(); // physical pickup + already-started meal; never starts movement/crafting.
         if(attackCooldown>0)attackCooldown--;
@@ -108,7 +110,7 @@ public final class CompanionIntelligence {
         // The wood pillar and staircase executors already have their own safe
         // escape plans. Generic terrain recovery must not build a competing
         // pillar in the middle of either plan.
-        if(!danger && (!wait || npc.gathering().isManual()) && !npc.menuOpen() && !npc.isEating()
+        if(!danger && !npc.tasks().advancedActive() && (!wait || npc.gathering().isManual()) && !npc.menuOpen() && !npc.isEating()
                 && !npc.gathering().onConstructedSupport() && !npc.gathering().miningStone()
                 && recovery.tick()){
             npc.gathering().pause();npc.crafting().pause();
@@ -205,6 +207,10 @@ public final class CompanionIntelligence {
             && (craftAvailable || (npc.gathering().kind()==ResourceGathering.Kind.STONE && npc.crafting().canBegin()))
             && (!npc.gathering().active() || (plan.toolsNeeded() && plan.missingLogs()==0)
                 || (npc.gathering().kind()==ResourceGathering.Kind.STONE && !npc.gathering().miningStone()))));
+        // A confirmed project owns its ingredient plan. Optional armor/basic
+        // recipes must not consume iron reserved for a bucket or the house's
+        // chosen palette. Finish an existing recipe and retain axe maintenance.
+        if(npc.tasks().advancedActive() && !axeMaintenance && !npc.crafting().isWorking())craft=false;
         // FOLLOW (70) and idle WAIT (80) used to starve crafting forever,
         // including AFTER an axe had broken. Combat, escape, eating and open
         // inventory still outrank maintenance. Pillar cleanup remains ahead
@@ -341,6 +347,8 @@ public final class CompanionIntelligence {
         if(npc.squaredDistanceTo(owner)>225){follow(owner);return;}
         if(!npc.getNavigation().isIdle() || npc.age<nextStroll)return;
         nextStroll=npc.age+40+npc.getRandom().nextInt(40);
+        if(!npc.tasks().active() && !npc.gathering().active() && npc.getHealth()>=18
+                && npc.autoSurvive && survey.idleStep())return;
         Vec3d pos=NoPenaltyTargeting.find(npc,6,2);
         if(pos!=null && pos.squaredDistanceTo(owner.getPos())<225)startSafe(BlockPos.ofFloored(pos),0.95);
     }

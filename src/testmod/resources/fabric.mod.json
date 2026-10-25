@@ -12,7 +12,13 @@
       "dev.aiplayer.test.ExcavationTests",
       "dev.aiplayer.test.FallingTreeTests",
       "dev.aiplayer.test.BaritoneNavigationTests",
-      "dev.aiplayer.test.CompanionTaskTests"
+      "dev.aiplayer.test.CompanionTaskTests",
+      "dev.aiplayer.test.FarmProjectTests",
+      "dev.aiplayer.test.FoodAutonomyTests",
+      "dev.aiplayer.test.HouseProjectTests",
+      "dev.aiplayer.test.OwnedDoorNavigationTests",
+      "dev.aiplayer.test.ProjectMaterialsTests",
+      "dev.aiplayer.test.ProjectWorkTests"
     ]
   },
   "depends": {

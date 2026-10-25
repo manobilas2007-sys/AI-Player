@@ -39,7 +39,7 @@ public final class ResourceGathering {
     private BlockPos origin, tree;
     private AnimalEntity animal;
     private BlockPos waypoint;
-    private int waypointIndex, waypointStarted, huntStarted;
+    private int waypointIndex, waypointStarted, huntStarted, nextPreyScan;
     private final java.util.Map<java.util.UUID,Integer> avoidedAnimals=new java.util.HashMap<>();
     private Vec3d lastLocation=Vec3d.ZERO;
     private int attackCooldown, pausedAt=-1;
@@ -175,7 +175,7 @@ public final class ResourceGathering {
         pausedAt=-1;mining.reset();stone.reset();treeLogs.clear();cleaning=pillar.active();lootTarget=null;nextRoute=0;
         searching=false;kind=task; desired=Math.max(1,Math.min(264,count)); gathered=0;
         manual=fromPlayer; if(!fromPlayer)lastAutoKind=task; origin=npc.getBlockPos().toImmutable(); tree=null; animal=null;waypoint=null;waypointIndex=0;
-        lastAction=npc.age; nextSearch=0; noProgressTicks=0;attackCooldown=0;
+        lastAction=npc.age; nextSearch=0; nextPreyScan=0; noProgressTicks=0;attackCooldown=0;
         npc.getNavigation().stop();
         if(kind==Kind.STONE && !SurfaceStoneGathering.caveAccess(npc,npc.getBlockPos())) {
             tell("Me leve até uma caverna pra eu pegar pedra, meu rei. Quando chegar lá, me peça de novo.");
@@ -408,6 +408,13 @@ public final class ResourceGathering {
     }
     private boolean seekDrops() {
         if(!npc.autoLoot)return false;
+        // A manual food order is a hunt when suitable prey is reachable. Do
+        // not let an unrelated log or distant loose apple replace that order.
+        // Contact pickup and our own physical loot still take precedence.
+        boolean huntFirst=kind==Kind.FOOD && manual && preparePrey();
+        if(huntFirst && lootTarget!=null && !huntingPickup(lootTarget)){
+            lootTarget=null;nextRoute=0;npc.getNavigation().stop();
+        }
         avoidedDrops.entrySet().removeIf(e -> e.getValue()<=npc.age);
         if(lootTarget!=null && (!lootTarget.isAlive() || npc.age-lootStarted>120
                 || !npc.backpack.canInsert(lootTarget.getStack())))skipDrop();
@@ -416,6 +423,7 @@ public final class ResourceGathering {
             lootTarget=npc.getWorld().getEntitiesByClass(net.minecraft.entity.ItemEntity.class,
                 npc.getBoundingBox().expand(8),d -> d.isAlive() && !d.cannotPickup()
                     && !avoidedDrops.containsKey(d.getUuid()) && npc.backpack.canInsert(d.getStack())
+                    && (!huntFirst || huntingPickup(d))
                     && (kind==Kind.NONE || (kind==Kind.WOOD && d.getStack().isIn(ItemTags.LOGS))
                         // Opportunistic wood salvage is allowed while foraging. Only actual food
                         // advances the FOOD goal; stone work stays restricted to cobblestone.
@@ -540,8 +548,34 @@ public final class ResourceGathering {
         if(noProgressTicks>=160){deferTree(1200);if(tree!=null)avoidedTrees.put(tree,npc.age+1200);treeLogs.clear();tree=null;noProgressTicks=0;nextSearch=npc.age+25;}
     }
     private boolean prey(AnimalEntity a) {
-        return a.isAlive() && !a.isBaby() && (a instanceof CowEntity || a instanceof PigEntity
+        return a.isAlive() && !a.isBaby() && !a.hasCustomName() && !a.isLeashed()
+            && !a.isPersistent() && !a.isInLove() && !a.hasPassengers() && !a.hasVehicle()
+            && !(a instanceof PigEntity pig && pig.isSaddled())
+            && (a instanceof CowEntity || a instanceof PigEntity
                 || a instanceof SheepEntity || a instanceof RabbitEntity);
+    }
+    private boolean huntingPickup(net.minecraft.entity.ItemEntity drop){
+        return drop.getCommandTags().contains("aiplayer_drop_"+npc.getUuid())
+            || npc.survival().canCollect(drop);
+    }
+    /** Entity observation alone is not proof of reachability. Reuse the
+     * bounded terrain planner before committing a manual hunting priority. */
+    private boolean preparePrey(){
+        if(animal!=null && prey(animal) && npc.squaredDistanceTo(animal)<=25*25)return true;
+        animal=null;
+        if(npc.age<nextPreyScan)return false;
+        nextPreyScan=npc.age+20;
+        avoidedAnimals.entrySet().removeIf(e->e.getValue()<=npc.age);
+        var candidates=npc.getWorld().getEntitiesByClass(AnimalEntity.class,npc.getBoundingBox().expand(14),
+                a->prey(a) && !avoidedAnimals.containsKey(a.getUuid()) && npc.canSee(a))
+            .stream().sorted(Comparator.comparingDouble(npc::squaredDistanceTo)).limit(6).toList();
+        for(AnimalEntity candidate:candidates){
+            var route=WorkNavigation.findPath(npc,candidate.getBlockPos(),1,
+                dev.aiplayer.ai.navigation.NpcPathfinder.Mode.SAFE);
+            if(!WorkNavigation.safePath(npc,route,Math.min(npc.getBlockY(),candidate.getBlockY())-2))continue;
+            animal=candidate;huntStarted=npc.age;nextRoute=0;return true;
+        }
+        return false;
     }
     private boolean foodTick() {
         // A failed scan does not own movement: following and strolling may run meanwhile.
@@ -552,11 +586,7 @@ public final class ResourceGathering {
             animal=null;npc.getNavigation().stop();
         }
         if(animal==null || !prey(animal) || animal.squaredDistanceTo(npc)>25*25) {
-            animal=npc.getWorld().getEntitiesByClass(AnimalEntity.class,npc.getBoundingBox().expand(14),
-                    a -> prey(a) && !avoidedAnimals.containsKey(a.getUuid()))
-                    .stream().min(Comparator.comparingDouble(npc::squaredDistanceTo)).orElse(null);
-            huntStarted=npc.age;
-            if(animal==null) {
+            if(!preparePrey()) {
                 if(npc.age-lastAction>160){if(!manual)npc.speech().notice(CompanionSpeech.Event.NO_FOOD);tell("Não achei animal adequado pra conseguir comida por aqui, viu?");finish(false);}
                 nextSearch=npc.age+30;return false;
             }
@@ -565,9 +595,15 @@ public final class ResourceGathering {
         if(npc.squaredDistanceTo(animal)>2.5*2.5 || !npc.canSee(animal)) {
             if(npc.age>=nextRoute) {
                 nextRoute=npc.age+15;
-                if(!npc.getNavigation().startMovingTo(animal,1.23)) {
+                var route=WorkNavigation.findPath(npc,animal.getBlockPos(),1,
+                    dev.aiplayer.ai.navigation.NpcPathfinder.Mode.SAFE);
+                if(!WorkNavigation.safePath(npc,route,Math.min(npc.getBlockY(),animal.getBlockY())-2)) {
                     avoidedAnimals.put(animal.getUuid(),npc.age+400);
                     animal=null;return false;
+                }
+                npc.getNavigation().stop();
+                if(!npc.getNavigation().startMovingAlong(route,1.23)){
+                    avoidedAnimals.put(animal.getUuid(),npc.age+100);animal=null;return false;
                 }
             }
             return true;
@@ -609,7 +645,7 @@ public final class ResourceGathering {
         // activity must never bleed into the restored task. Only durable goals,
         // ownership and deferred trees are read from NBT.
         mining.reset();stone.reset();pausedAt=-1;kind=Kind.NONE;tree=null;animal=null;
-        lootTarget=null;lootStarted=0;nextDropScan=0;nextRoute=0;nextSearch=0;
+        lootTarget=null;lootStarted=0;nextDropScan=0;nextRoute=0;nextSearch=0;nextPreyScan=0;
         waypoint=null;waypointIndex=0;idleCooldown=0;searching=false;searchCenter=null;searchColumn=0;
         lastLocation=npc.getPos();noProgressTicks=0;attackCooldown=0;
         treeLogs.clear();pillar.readNbt(nbt);cleaning=pillar.active();
