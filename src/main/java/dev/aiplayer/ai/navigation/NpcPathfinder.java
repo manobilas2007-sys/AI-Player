@@ -37,14 +37,17 @@ public final class NpcPathfinder {
         // Match vanilla's feet sampling on farmland and other fractional floors.
         BlockPos start=BlockPos.ofFloored(npc.getX(),npc.getY()+0.5,npc.getZ());target=target.toImmutable();
         int tolerance=Math.max(0,Math.min(MAX_DISTANCE,distance));
-        if(!world.isChunkLoaded(start) || !world.isChunkLoaded(target)
-                || Math.max(Math.max(Math.abs(start.getX()-target.getX()),Math.abs(start.getY()-target.getY())),
-                    Math.abs(start.getZ()-target.getZ()))>MAX_DISTANCE+tolerance){
+        if(!world.isChunkLoaded(start) || !world.isChunkLoaded(target)){
             record(npc,new Stats("LIMIT",0,0,false));return null;
         }
         Terrain terrain=new Terrain(npc,world,mode,allowed);
         if(!terrain.permitted(start)){
             record(npc,new Stats("NO_PATH",0,0,false));return null;
+        }
+        start=terrain.normalizedStart(start);
+        if(Math.max(Math.max(Math.abs(start.getX()-target.getX()),Math.abs(start.getY()-target.getY())),
+                Math.abs(start.getZ()-target.getZ()))>MAX_DISTANCE+tolerance){
+            record(npc,new Stats("LIMIT",0,0,false));return null;
         }
         long now=world.getTime();Cached cached;
         synchronized(CACHE){cached=CACHE.get(npc);}
@@ -175,6 +178,39 @@ public final class NpcPathfinder {
                 if(!WorkNavigation.supportedGround(npc,key.down()))return false;
                 return (mode!=Mode.WORK && mode!=Mode.CAVE) || WorkNavigation.safeWorkFooting(npc,key);
             });
+        }
+        private BlockPos normalizedStart(BlockPos sampled){
+            if(standable(sampled) || !npc.isOnGround())return sampled;
+            // The center can be just outside a raised floor while part of the
+            // actual body is still supported by it. Start at that same-height
+            // supporting cell so validation does not reject an imaginary air
+            // node. Navigation still physically centers the NPC on the cell.
+            Box actor=npc.getBoundingBox();BlockPos best=null;double bestDistance=Double.MAX_VALUE;
+            for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++){
+                if(dx==0 && dz==0)continue;
+                BlockPos feet=sampled.add(dx,0,dz),floor=feet.down();
+                if(!standable(feet) || !WorkNavigation.safeWorkFooting(npc,feet))continue;
+                var shape=world.getBlockState(floor).getCollisionShape(world,floor);
+                if(shape.isEmpty())continue;
+                Box support=shape.getBoundingBox().offset(floor.getX(),floor.getY(),floor.getZ());
+                if(Math.abs(npc.getY()-support.maxY)>0.2
+                        || actor.maxX<=support.minX+0.0001 || actor.minX>=support.maxX-0.0001
+                        || actor.maxZ<=support.minZ+0.0001 || actor.minZ>=support.maxZ-0.0001)continue;
+                double x=feet.getX()+0.5-npc.getX(),z=feet.getZ()+0.5-npc.getZ();
+                Box centered=actor.stretch(x,0,z);
+                if(!loaded(centered) || world.getBlockCollisions(npc,centered).iterator().hasNext())continue;
+                boolean safe=true;
+                for(BlockPos cell:BlockPos.iterate(BlockPos.ofFloored(centered.minX,centered.minY,centered.minZ),
+                        BlockPos.ofFloored(centered.maxX,centered.maxY,centered.maxZ))){
+                    if(!world.isChunkLoaded(cell) || !permitted(new BlockPos(cell.getX(),sampled.getY(),cell.getZ()))
+                            || !world.getFluidState(cell).isEmpty() || hazard(cell)){
+                        safe=false;break;
+                    }
+                }
+                double distance=x*x+z*z;
+                if(safe && distance<bestDistance){best=feet.toImmutable();bestDistance=distance;}
+            }
+            return best==null?sampled:best;
         }
         private boolean transition(BlockPos from,BlockPos to){
             if(!standable(to))return false;

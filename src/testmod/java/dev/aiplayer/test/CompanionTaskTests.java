@@ -54,7 +54,7 @@ public final class CompanionTaskTests implements FabricGameTest {
         npc.backpack.setStack(1,new ItemStack(Items.OAK_PLANKS,16));
         npc.tasks().start(CompanionTasks.Kind.BUILD_SHELTER);
         c.runAtTick(1100,()->{
-            c.assertTrue(!npc.tasks().active(),"Shelter did not complete: "+npc.tasks().status()+" pos="+npc.getPos());
+            c.assertTrue(!npc.tasks().active(),"Shelter did not complete: "+npc.tasks().status()+" pos="+npc.getPos()+" "+npc.tasks().diagnostics());
             c.assertTrue(placed(c,npc)==80 && plankCount(npc)==0,
                 "Shelter duplicated/lost materials: placed="+placed(c,npc)+" inventory="+plankCount(npc));
             c.assertTrue(c.getWorld().getBlockState(c.getAbsolutePos(new BlockPos(19,3,15))).isAir()

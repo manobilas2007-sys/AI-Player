@@ -171,4 +171,30 @@ public final class BaritoneNavigationTests implements FabricGameTest {
             c.complete();
         });
     }
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="baritone_navigation",tickLimit=110)
+    public void originOnOverhangingRaisedFloorCanRecover(TestContext c){
+        CompanionEntity a=worker(c,new BlockPos(17,3,17));
+        for(int x=14;x<=23;x++)for(int z=13;z<=22;z++)c.setBlockState(new BlockPos(x,1,z),Blocks.DIRT);
+        for(int x=17;x<=21;x++)for(int z=15;z<=19;z++)c.setBlockState(new BlockPos(x,2,z),Blocks.OAK_PLANKS);
+        BlockPos raw=c.getAbsolutePos(new BlockPos(16,3,17));
+        BlockPos destination=c.getAbsolutePos(new BlockPos(18,3,17));
+        a.refreshPositionAndAngles(raw.getX()+0.93369967,raw.getY(),raw.getZ()+0.5089,0,0);
+        c.runAtTick(5,()->{
+            c.assertTrue(a.isOnGround() && !WorkNavigation.safeWorkFooting(a,a.getBlockPos()),
+                "Fixture does not reproduce the supported overhang");
+            Vec3d before=a.getPos();Path path=WorkNavigation.findPath(a,destination,0);
+            c.assertTrue(path!=null && WorkNavigation.surfacePath(a,path,destination.getY()),
+                "Supported overhang produced an invalid first node: "+NpcPathfinder.diagnostics(a));
+            c.assertTrue(path.getNode(0).x==raw.getX()+1 && path.getNode(0).y==raw.getY(),
+                "Search origin was not the actual same-height supporting cell");
+            c.assertTrue(before.equals(a.getPos()),"Planning teleported the actor onto its origin node");
+            c.assertTrue(a.getNavigation().startMovingAlong(path,1.0),"NPC rejected the centering path");
+        });
+        c.runAtTick(90,()->{
+            c.assertTrue(a.getY()>=destination.getY()-0.1
+                    && a.squaredDistanceTo(Vec3d.ofBottomCenter(destination))<1.5,
+                "NPC did not physically center and recover from the floor edge: "+a.getPos());
+            c.complete();
+        });
+    }
 }

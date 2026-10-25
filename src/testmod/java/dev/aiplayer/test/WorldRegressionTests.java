@@ -42,6 +42,10 @@ public final class WorldRegressionTests implements FabricGameTest {
         c.setBlockState(target,Blocks.WATER);
         BlockPos abs=c.getAbsolutePos(target);
         ItemEntity drop=new ItemEntity(c.getWorld(),abs.getX()+0.5,abs.getY()+0.3,abs.getZ()+0.5,new ItemStack(Items.SPRUCE_LOG,1));
+        // Keep the fixture in its water source: ItemEntity otherwise receives a
+        // random sideways launch and may leave the pool before the route check.
+        // Gravity and buoyancy remain enabled, as in the real pickup scenario.
+        drop.setVelocity(Vec3d.ZERO);
         drop.setPickupDelay(0);c.getWorld().spawnEntity(drop);
         a.refreshPositionAndAngles(c.getAbsolutePos(new BlockPos(3,2,2)).getX()+0.5,
             c.getAbsolutePos(new BlockPos(3,2,2)).getY()+0.2,
