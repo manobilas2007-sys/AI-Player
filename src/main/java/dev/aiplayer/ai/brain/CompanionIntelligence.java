@@ -207,10 +207,11 @@ public final class CompanionIntelligence {
             && (craftAvailable || (npc.gathering().kind()==ResourceGathering.Kind.STONE && npc.crafting().canBegin()))
             && (!npc.gathering().active() || (plan.toolsNeeded() && plan.missingLogs()==0)
                 || (npc.gathering().kind()==ResourceGathering.Kind.STONE && !npc.gathering().miningStone()))));
-        // A confirmed project owns its ingredient plan. Optional armor/basic
-        // recipes must not consume iron reserved for a bucket or the house's
-        // chosen palette. Finish an existing recipe and retain axe maintenance.
-        if(npc.tasks().advancedActive() && !axeMaintenance && !npc.crafting().isWorking())craft=false;
+        // The project owns new recipes, including the axe prerequisite for
+        // timber. Generic maintenance must not consume its first gathered log
+        // or its bucket iron, nor repeatedly try a bench in uncleared grass.
+        // Only finish the recipe that was already pending before the order.
+        if(npc.tasks().advancedActive() && !npc.crafting().hasPendingRecipe())craft=false;
         // FOLLOW (70) and idle WAIT (80) used to starve crafting forever,
         // including AFTER an axe had broken. Combat, escape, eating and open
         // inventory still outrank maintenance. Pillar cleanup remains ahead

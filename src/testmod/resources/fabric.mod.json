@@ -18,7 +18,9 @@
       "dev.aiplayer.test.HouseProjectTests",
       "dev.aiplayer.test.OwnedDoorNavigationTests",
       "dev.aiplayer.test.ProjectMaterialsTests",
-      "dev.aiplayer.test.ProjectWorkTests"
+      "dev.aiplayer.test.ProjectWorkTests",
+      "dev.aiplayer.test.ProjectBootstrapTests",
+      "dev.aiplayer.test.ProjectArbitrationTests"
     ]
   },
   "depends": {

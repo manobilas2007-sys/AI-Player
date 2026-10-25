@@ -5,6 +5,7 @@ import dev.aiplayer.ai.Mode;
 import dev.aiplayer.ai.OwnedBlocks;
 import dev.aiplayer.ai.tasks.ProjectMaterials;
 import dev.aiplayer.ai.tasks.ProjectWork;
+import dev.aiplayer.ai.tasks.CompanionTasks;
 import dev.aiplayer.entity.CompanionEntity;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Blocks;
@@ -40,6 +41,67 @@ public final class ProjectMaterialsTests implements FabricGameTest {
     private void owner(CompanionEntity npc){
         NbtCompound saved=new NbtCompound();npc.writeCustomDataToNbt(saved);
         saved.putUuid("Owner",UUID.randomUUID());npc.readCustomDataFromNbt(saved);npc.setMode(Mode.WAIT);
+    }
+
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=320)
+    public void emptyProjectGetsItsFirstRealLogThroughGrassWithoutAFreeTool(TestContext c){
+        CompanionEntity npc=worker(c);owner(npc);
+        npc.tasks().startAt(CompanionTasks.Kind.TEND_FARM,npc.getBlockPos(),null);
+        ProjectMaterials materials=materials(npc);
+        for(int x=0;x<12;x++)for(int z=0;z<10;z++){
+            c.setBlockState(new BlockPos(x,1,z),Blocks.DIRT);
+            c.setBlockState(new BlockPos(x,2,z),Blocks.GRASS);
+        }
+        BlockPos base=c.getAbsolutePos(new BlockPos(7,2,4));
+        c.getWorld().setBlockState(base,Blocks.OAK_LOG.getDefaultState());
+        c.getWorld().setBlockState(base.up(),Blocks.OAK_LOG.getDefaultState());
+        // Both trunk levels are surrounded by noncolliding tall grass, with
+        // dirt below and leaves above. Neither log has a literal AIR neighbor.
+        for(int x=-1;x<=1;x++)for(int z=-1;z<=1;z++){
+            c.getWorld().setBlockState(base.add(x,2,z),Blocks.OAK_LEAVES.getDefaultState());
+        }
+        for(var side:net.minecraft.util.math.Direction.Type.HORIZONTAL){
+            c.getWorld().setBlockState(base.offset(side),Blocks.TALL_GRASS.getDefaultState());
+            c.getWorld().setBlockState(base.offset(side).up(),Blocks.TALL_GRASS.getDefaultState()
+                .with(net.minecraft.block.TallPlantBlock.HALF,net.minecraft.block.enums.DoubleBlockHalf.UPPER));
+        }
+        boolean[] physicalDrop={false};
+        c.assertTrue(npc.backpack.isEmpty() && npc.getMainHandStack().isEmpty(),"Bootstrap fixture contains supplied materials");
+        c.runAtEveryTick(()->{
+            materials.ensure(Items.OAK_LOG,1);
+            if(!c.getWorld().getEntitiesByClass(ItemEntity.class,new Box(base).expand(3),
+                    e->e.isAlive() && e.getStack().isOf(Items.OAK_LOG)
+                        && e.getCommandTags().contains("aiplayer_drop_"+npc.getUuid())).isEmpty())physicalDrop[0]=true;
+        });
+        c.runAtTick(260,()->{
+            c.assertTrue(c.getWorld().getBlockState(base).isAir() && physicalDrop[0],
+                "Empty project did not physically break its grass-surrounded first log: "+materials.status());
+            c.assertTrue(materials.count(Items.OAK_LOG)==1,"First physical log was not picked up: "+materials.status());
+            c.assertTrue(materials.count(Items.WOODEN_AXE)==0 && materials.count(Items.CRAFTING_TABLE)==0,
+                "One-log bootstrap invented a tool or consumed its requested log for an unnecessary recipe");c.complete();
+        });
+    }
+
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=220)
+    public void missingWorkbenchPhysicallyClearsDenseGrassBeforePlacement(TestContext c){
+        CompanionEntity npc=worker(c);ProjectMaterials materials=materials(npc);
+        for(int x=0;x<9;x++)for(int z=0;z<10;z++){
+            c.setBlockState(new BlockPos(x,1,z),Blocks.DIRT);
+            c.setBlockState(new BlockPos(x,2,z),Blocks.GRASS);
+        }
+        BlockPos preferred=c.getAbsolutePos(new BlockPos(3,2,6));materials.preferWorkbench(preferred);
+        npc.backpack.setStack(0,new ItemStack(Items.IRON_INGOT,3));
+        npc.backpack.setStack(1,new ItemStack(Items.OAK_PLANKS,8));
+        c.assertTrue(c.getWorld().getBlockState(preferred).isOf(Blocks.GRASS),"Station fixture has no vegetation to clear");
+        c.runAtEveryTick(()->materials.ensure(Items.BUCKET,1));
+        c.runAtTick(170,()->{
+            c.assertTrue(materials.count(Items.BUCKET)==1,"Grass stalled the station/recipe dependency: "+materials.status());
+            c.assertTrue(c.getWorld().getBlockState(preferred).isOf(Blocks.CRAFTING_TABLE)
+                    && OwnedBlocks.get(c.getWorld()).owned(preferred,npc.getUuid()),
+                "No real owned workbench replaced the station vegetation");
+            c.assertTrue(materials.count(Items.OAK_PLANKS)==4 && materials.count(Items.IRON_INGOT)==0
+                    && materials.count(Items.CRAFTING_TABLE)==0,"Grass preparation changed the real recipe costs");c.complete();
+        });
     }
 
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=160)

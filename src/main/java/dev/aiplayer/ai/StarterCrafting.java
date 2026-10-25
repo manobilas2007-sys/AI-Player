@@ -32,6 +32,7 @@ public final class StarterCrafting {
     public StarterCrafting(CompanionEntity npc){this.npc=npc;this.mining=new PhysicalMining(npc);}
     public boolean hasBench(){return ownBench && benchPos!=null;}
     public boolean hasSession(){return pending!=null || reclaiming;}
+    public boolean hasPendingRecipe(){return pending!=null;}
     /** A bench recovery is optional while the next stone recipe lacks material.
      * Ownership remains recorded; mining may temporarily take priority. */
     public boolean isReclaiming(){return reclaiming && pending==null;}
@@ -363,7 +364,10 @@ public final class StarterCrafting {
             if(!produce(pending)){pending=null;reclaiming=ownBench;retryAt=npc.age+60;return;}
             npc.intelligence().memory().succeeded("Fabricado: "+Registries.ITEM.getId(pending.result));
         }
-        Recipe next=npc.autoCraft?choose():null;
+        // A confirmed project owns the next ingredient decision. Finish the
+        // recipe already in progress, then return control without reserving
+        // its first logs or bucket iron for another optional tool recipe.
+        Recipe next=npc.autoCraft && !npc.tasks().advancedActive()?choose():null;
         if(next!=null && contains(next) && npc.backpack.canInsert(new ItemStack(next.result,next.number))
                 && (!next.bench || (benchPos!=null && npc.getWorld().getBlockState(benchPos).isOf(Blocks.CRAFTING_TABLE)))) {
             pending=next;timer=next.bench?34:12;

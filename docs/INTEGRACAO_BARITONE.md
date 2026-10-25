@@ -1,4 +1,4 @@
-# AI Player 0.6.0-dev: Baritone, diálogos e projetos físicos
+# AI Player 0.6.1-dev: Baritone, diálogos e projetos físicos
 
 ## Arquitetura
 

@@ -44,16 +44,16 @@ jobs:
           Path('SOURCE_REVISION.txt').write_text(f'Repository: https://github.com/{repo}\nCommit: {revision}\nSource: https://github.com/{repo}/tree/{revision}\nBaritone upstream: 8c55ad0721d42a01a359834edc16aaa9b5bc587d\n')
           PYCODE
       - name: Test packaged mod on production Fabric 0.20.0
-        run: python3 tools/run_packaged_runtime_smoke.py --mod-jar build/libs/ai-player-0.6.0-dev.jar --smoke-jar build/runtime-smoke/ai-player-runtime-smoke.jar --fallingtree-jar libs/FallingTree-1.20.1-4.3.4.jar --loader 0.20.0 --work-dir build/packaged-runtime-0.20.0
+        run: python3 tools/run_packaged_runtime_smoke.py --mod-jar build/libs/ai-player-0.6.1-dev.jar --smoke-jar build/runtime-smoke/ai-player-runtime-smoke.jar --fallingtree-jar libs/FallingTree-1.20.1-4.3.4.jar --loader 0.20.0 --work-dir build/packaged-runtime-0.20.0
       - name: Test packaged mod on production Fabric 0.15.11
-        run: python3 tools/run_packaged_runtime_smoke.py --mod-jar build/libs/ai-player-0.6.0-dev.jar --smoke-jar build/runtime-smoke/ai-player-runtime-smoke.jar --fallingtree-jar libs/FallingTree-1.20.1-4.3.4.jar --loader 0.15.11 --work-dir build/packaged-runtime-0.15.11
+        run: python3 tools/run_packaged_runtime_smoke.py --mod-jar build/libs/ai-player-0.6.1-dev.jar --smoke-jar build/runtime-smoke/ai-player-runtime-smoke.jar --fallingtree-jar libs/FallingTree-1.20.1-4.3.4.jar --loader 0.15.11 --work-dir build/packaged-runtime-0.15.11
       - name: Run Minecraft regression suite
         if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || inputs.run_gametests }}
         run: bash gradlew runGametest --no-daemon
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AI-Player-v0.6.0-dialogue-settlements-build-and-tests
+          name: AI-Player-v0.6.1-project-bootstrap-build-and-tests
           path: |
             build/libs/ai-player-*.jar
             embedded-baritone/build/libs/*.jar

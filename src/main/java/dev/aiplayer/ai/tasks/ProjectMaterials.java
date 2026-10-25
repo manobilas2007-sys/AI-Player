@@ -49,6 +49,8 @@ public final class ProjectMaterials {
     private Box worksite;
     private int scanRadius,scanY,scanEdge,craftTicks,scans,searchAt,targetSince,nextRoute;
     private int lastEnsure=-1;
+    private int woodHarvests;
+    private boolean preparingAxe;
     private double bestTargetDistance=Double.MAX_VALUE;
     private final Map<UUID,Integer> avoidedDrops=new HashMap<>();
     private UUID dropTarget;
@@ -91,6 +93,7 @@ public final class ProjectMaterials {
         scanRadius=0;scanY=0;scanEdge=0;scans=0;searchAt=0;targetSince=0;nextRoute=0;
         bestTargetDistance=Double.MAX_VALUE;dropProgressAt=0;
         dropTarget=null;bestDropDistance=Double.MAX_VALUE;avoidedDrops.clear();lastEnsure=-1;
+        woodHarvests=0;preparingAxe=false;
         status="Conferir materiais do projeto";
     }
 
@@ -194,6 +197,15 @@ public final class ProjectMaterials {
         for(var ingredient:recipe.ingredients().entrySet())if(!consume(ingredient.getKey(),ingredient.getValue()))return false;
         ItemStack overflow=npc.backpack.addStack(new ItemStack(recipe.output(),recipe.amount()));
         if(!overflow.isEmpty())npc.dropStack(overflow);
+        if(recipe.output() instanceof AxeItem){
+            // The replacement must exist before retiring a worn tool.
+            for(int i=0;i<npc.backpack.size();i++){
+                ItemStack stack=npc.backpack.getStack(i);
+                if(stack.getItem() instanceof AxeItem && ResourcePlan.worn(stack))npc.backpack.setStack(i,ItemStack.EMPTY);
+            }
+            ItemStack held=npc.getMainHandStack();
+            if(held.getItem() instanceof AxeItem && ResourcePlan.worn(held))npc.equipStack(EquipmentSlot.MAINHAND,ItemStack.EMPTY);
+        }
         npc.backpack.markDirty();return true;
     }
     private boolean accessible(ServerWorld world,BlockPos pos){
@@ -210,6 +222,7 @@ public final class ProjectMaterials {
         if(!ensure(world,Items.CRAFTING_TABLE,1,depth+1))return false;
         BlockPos spot=preferredBench!=null?preferredBench:stationSpot(world);
         if(spot==null){status="Preciso de espaço seguro para colocar a bancada";return false;}
+        if(!clearStation(world,spot))return false;
         status="Colocar bancada real para fabricar";
         if(work.place(spot,Blocks.CRAFTING_TABLE.getDefaultState(),Items.CRAFTING_TABLE,1))bench=spot.toImmutable();
         return false;
@@ -219,12 +232,25 @@ public final class ProjectMaterials {
         for(int radius=1;radius<=3;radius++)for(int dx=-radius;dx<=radius;dx++)for(int dz=-radius;dz<=radius;dz++){
             if(Math.max(Math.abs(dx),Math.abs(dz))!=radius)continue;
             BlockPos pos=here.add(dx,0,dz);
-            if(world.isChunkLoaded(pos) && world.isChunkLoaded(pos.down()) && world.getBlockState(pos).isAir()
+            if(world.isChunkLoaded(pos) && world.isChunkLoaded(pos.down()) && work.replaceable(pos)
+                    && (worksite==null || !worksite.contains(Vec3d.ofCenter(pos)))
                     && world.getFluidState(pos).isEmpty() && world.getBlockState(pos.down()).isSolidBlock(world,pos.down())
                     && !OwnedBlocks.get(world).protectedBlock(pos) && !OwnedBlocks.get(world).claimed(pos)
                     && world.getOtherEntities(npc,new Box(pos)).isEmpty())return pos.toImmutable();
         }
         return null;
+    }
+    private boolean clearStation(ServerWorld world,BlockPos spot){
+        if(!world.isChunkLoaded(spot) || work.protectedPosition(spot)){
+            status="Preservar local protegido da estação de trabalho";return false;
+        }
+        if(world.getBlockState(spot).isAir())return true;
+        if(!work.replaceable(spot)){
+            status="Preciso de espaço livre sem desmontar construções para a estação";return false;
+        }
+        status="Retirar vegetação ou neve antes de colocar a estação de trabalho";
+        if(!work.clearNatural(spot))status=work.status();
+        return false;
     }
     private FurnaceBlockEntity furnace(ServerWorld world,int depth){
         if(preferredFurnace!=null && world.isChunkLoaded(preferredFurnace)
@@ -236,6 +262,7 @@ public final class ProjectMaterials {
         if(!ensure(world,Items.FURNACE,1,depth+1))return null;
         BlockPos spot=preferredFurnace!=null?preferredFurnace:stationSpot(world);
         if(spot==null){status="Preciso de espaço seguro para a fornalha";return null;}
+        if(!clearStation(world,spot))return null;
         status="Colocar fornalha real para fundir materiais";
         if(work.place(spot,Blocks.FURNACE.getDefaultState(),Items.FURNACE,1))furnace=spot.toImmutable();
         return null;
@@ -323,7 +350,10 @@ public final class ProjectMaterials {
         for(Direction side:Direction.values()){
             BlockPos neighbor=pos.offset(side);
             if(!world.isChunkLoaded(neighbor))return false;
-            if(world.getBlockState(neighbor).isAir())exposed=true;
+            // Grass and flowers do not hide an otherwise reachable resource.
+            // A short tree can have vegetation on all four trunk sides and a
+            // canopy above, leaving no literal AIR neighbor at its base.
+            if(world.getBlockState(neighbor).getCollisionShape(world,neighbor).isEmpty())exposed=true;
             if(!world.getFluidState(neighbor).isEmpty())return false;
         }
         if(!exposed)return false;
@@ -370,6 +400,19 @@ public final class ProjectMaterials {
                 || !world.getGameRules().getBoolean(GameRules.DO_TILE_DROPS)){
             status="As regras do mundo impedem minerar materiais com drops reais";return false;
         }
+        if(item==log && npc.autoEquip && !preparingAxe && !ResourcePlan.usable(npc,AxeItem.class)
+                && (woodHarvests>0 || wornAxe())){
+            // The first log is genuinely gathered by hand. When another log
+            // is needed, this project owns its tool prerequisite instead of
+            // yielding its ingredients to the unrelated starter-craft job.
+            // The guard permits the axe recipe to gather its own missing logs
+            // without recursing wood -> axe -> wood forever.
+            preparingAxe=true;
+            try{
+                ensure(world,Items.WOODEN_AXE,count(Items.WOODEN_AXE)+1,0);
+            }finally{preparingAxe=false;}
+            return false;
+        }
         BlockState required=item==Items.RAW_IRON?Blocks.IRON_ORE.getDefaultState():Blocks.STONE.getDefaultState();
         if((item==Items.COBBLESTONE || item==Items.COAL || item==Items.RAW_IRON) && !suitablePick(required)){
             if(!npc.autoEquip){status="Equipe uma picareta adequada ou ative equipamento automático";return false;}
@@ -382,7 +425,10 @@ public final class ProjectMaterials {
             if(distance<bestTargetDistance-0.2){bestTargetDistance=distance;targetSince=npc.age;}
             if(npc.age-targetSince>220){npc.intelligence().memory().failed(target,world.getTime());target=null;mining.reset();return false;}
             if(!work.approach(target))return false;
-            if(mining.tick(target)){target=null;scanFor=null;}
+            if(mining.tick(target)){
+                if(item==log)woodHarvests++;
+                target=null;scanFor=null;
+            }
             return false;
         }
         if(npc.age<searchAt)return false;
@@ -414,6 +460,14 @@ public final class ProjectMaterials {
         }
         status="Procurar "+label(item)+" em blocos naturais visíveis";return false;
     }
+    private boolean wornAxe(){
+        if(npc.getMainHandStack().getItem() instanceof AxeItem && ResourcePlan.worn(npc.getMainHandStack()))return true;
+        for(int i=0;i<npc.backpack.size();i++){
+            ItemStack stack=npc.backpack.getStack(i);
+            if(stack.getItem() instanceof AxeItem && ResourcePlan.worn(stack))return true;
+        }
+        return false;
+    }
     private void surveyStep(ServerWorld world,Item item){
         int[][] offsets={{12,0},{0,12},{-12,0},{0,-12},{18,18},{-18,18},{-18,-18},{18,-18}};
         int[] offset=offsets[(scans-1)%offsets.length];
@@ -428,6 +482,7 @@ public final class ProjectMaterials {
     public void writeNbt(NbtCompound root){
         NbtCompound n=new NbtCompound();n.putString("Dimension",dimension);
         n.putString("Log",Registries.ITEM.getId(log).toString());n.putString("Planks",Registries.ITEM.getId(planks).toString());
+        n.putInt("WoodHarvests",woodHarvests);
         if(furnace!=null)n.putLong("Furnace",furnace.asLong());if(bench!=null)n.putLong("Bench",bench.asLong());
         if(preferredFurnace!=null)n.putLong("PreferredFurnace",preferredFurnace.asLong());
         if(preferredBench!=null)n.putLong("PreferredBench",preferredBench.asLong());
@@ -438,6 +493,7 @@ public final class ProjectMaterials {
         cancel();furnace=null;bench=null;preferredFurnace=null;preferredBench=null;dimension="";
         if(!root.contains("ProjectMaterials"))return;
         NbtCompound n=root.getCompound("ProjectMaterials");dimension=n.getString("Dimension");
+        woodHarvests=Math.max(0,Math.min(10000,n.getInt("WoodHarvests")));
         Identifier l=Identifier.tryParse(n.getString("Log")),p=Identifier.tryParse(n.getString("Planks"));
         if(l!=null && p!=null)selectWood(Registries.ITEM.get(l),Registries.ITEM.get(p));
         if(!dimension.equals(npc.getWorld().getRegistryKey().getValue().toString())){dimension="";return;}
