@@ -1,8 +1,10 @@
-# AI Player v0.6.0-dev — diálogos, abrigo e agricultura
+# AI Player v0.6.1-dev — diálogos, abrigo e agricultura
 
 Minecraft Java **1.20.1**, Fabric, Java 17 e Gradle Wrapper 8.7.
 
 Converse com seu NPC pelo chat normal. O interpretador local aceita sinônimos, acentos e pequenos erros de escrita; não precisa de chave de API nem serviço de IA externo.
+
+A versão 0.6.1 corrige o início de projetos sem materiais: troncos acessíveis cercados por grama entram na busca, a vegetação é removida antes de colocar estações e o projeto controla suas receitas e ferramentas. Os testes completos de abrigo e plantação começam com inventário e mão vazios, usando recursos naturais próximos.
 
 ## Exemplos de diálogo
 
