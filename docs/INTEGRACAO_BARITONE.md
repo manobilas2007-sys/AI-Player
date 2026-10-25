@@ -67,6 +67,8 @@ O plano possui 80 posições de tábuas: piso 5×5, perímetro com duas camadas
 de parede, vão de entrada com duas alturas e teto 5×5. O vão é uma abertura,
 não um bloco de porta. Cada bloco colocado consome uma tábua real; posições
 já concluídas e reconhecidas como próprias são preservadas ao retomar.
+A execução monta o piso, os quatro apoios de canto e o teto antes de
+fechar as paredes; o NPC trabalha de dentro do abrigo para manter acesso.
 
 O local começa próximo ao NPC e exige terreno carregado, apoio para os
 blocos, espaço livre e posições de trabalho alcançáveis. Blocos existentes
@@ -183,3 +185,12 @@ O núcleo derivado de Baritone é LGPL-3.0-or-later. O restante do projeto
 conserva seus próprios direitos. O estado específico de compilação e
 GameTests de cada revisão deve ser consultado no workflow correspondente;
 este documento não declara testes executados sem o respectivo resultado.
+
+## Cobertura de regressão desta integração
+
+A suíte contém 102 GameTests: os 79 originais, quatro regressões de
+ferramentas e mineração e 19 cenários de navegação e projetos. O teste de
+borda do piso verifica uma rota física sem teletransporte. O cenário de
+item submerso zera apenas o impulso lateral aleatório da montagem do teste,
+preservando gravidade, flutuação, tempo limite e verificações originais.
+Os resultados de execução pertencem à revisão identificada no Actions.
