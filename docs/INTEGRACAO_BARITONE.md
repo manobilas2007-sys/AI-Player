@@ -68,7 +68,7 @@ de parede, vão de entrada com duas alturas e teto 5×5. O vão é uma abertura,
 não um bloco de porta. Cada bloco colocado consome uma tábua real; posições
 já concluídas e reconhecidas como próprias são preservadas ao retomar.
 A execução monta o piso, os quatro apoios de canto e o teto antes de
-fechar as paredes; o NPC trabalha de dentro do abrigo para manter acesso.
+fechar as paredes; o NPC trabalha de dentro do abrigo para manter acesso.\nO teto avança da borda para o centro para preservar a linha de visão.
 
 O local começa próximo ao NPC e exige terreno carregado, apoio para os
 blocos, espaço livre e posições de trabalho alcançáveis. Blocos existentes
@@ -188,9 +188,9 @@ este documento não declara testes executados sem o respectivo resultado.
 
 ## Cobertura de regressão desta integração
 
-A suíte contém 102 GameTests: os 79 originais, quatro regressões de
-ferramentas e mineração e 19 cenários de navegação e projetos. O teste de
+A suíte contém 103 GameTests: os 79 originais, quatro regressões de
+ferramentas e mineração e 20 cenários de navegação e projetos. O teste de
 borda do piso verifica uma rota física sem teletransporte. O cenário de
 item submerso zera apenas o impulso lateral aleatório da montagem do teste,
 preservando gravidade, flutuação, tempo limite e verificações originais.
-Os resultados de execução pertencem à revisão identificada no Actions.
+O plantio com fabricação automática também verifica que uma única enxada\nreal é produzida e utilizada, sem repetir a receita após sua conclusão.\nOs resultados de execução pertencem à revisão identificada no Actions.
