@@ -215,7 +215,10 @@ public final class CompanionTasks {
         List<BlockPos> blocks=new ArrayList<>(80);
         for(int x=0;x<5;x++)for(int z=0;z<5;z++)blocks.add(anchor.add(x,0,z));
         for(int x:new int[]{0,4})for(int z:new int[]{0,4})for(int y=1;y<=2;y++)blocks.add(anchor.add(x,y,z));
-        for(int x=0;x<5;x++)for(int z=0;z<5;z++)blocks.add(anchor.add(x,3,z));
+        // Roof the outer rim first, then work inward. A completed inner row
+        // would hide the outer block's center from every interior stance.
+        for(int radius=2;radius>=0;radius--)for(int x=0;x<5;x++)for(int z=0;z<5;z++)
+            if(Math.max(Math.abs(x-2),Math.abs(z-2))==radius)blocks.add(anchor.add(x,3,z));
         for(int y=1;y<=2;y++)for(int x=0;x<5;x++)for(int z=0;z<5;z++)
             if((x==0 || x==4 || z==0 || z==4) && !(x==2 && z==0)
                     && !((x==0 || x==4) && (z==0 || z==4)))blocks.add(anchor.add(x,y,z));
@@ -462,7 +465,7 @@ public final class CompanionTasks {
         NbtCompound n=new NbtCompound();n.putString("Kind",kind.name());n.putString("Dimension",dimension);
         if(anchor!=null)n.putLong("Anchor",anchor.asLong());n.putInt("Index",index);n.putInt("Explored",explored);
         n.putBoolean("GatheringWood",gatheringWood);n.putString("Status",status);
-        n.putInt("BlueprintVersion",1);
+        n.putInt("BlueprintVersion",2);
         if(pendingHarvest!=null)n.putLong("PendingHarvest",pendingHarvest.asLong());
         n.putLongArray("Fields",fields.stream().mapToLong(BlockPos::asLong).toArray());
         root.put("CompanionProject",n);
@@ -482,7 +485,7 @@ public final class CompanionTasks {
         index=Math.max(0,Math.min(kind==Kind.BUILD_SHELTER?80:kind==Kind.EXPLORE?8:9,n.getInt("Index")));
         // Older in-progress blueprints used a different placement order. Scan
         // them again; already owned blocks are retained and consume no items.
-        if(kind==Kind.BUILD_SHELTER && n.getInt("BlueprintVersion")!=1)index=0;
+        if(kind==Kind.BUILD_SHELTER && n.getInt("BlueprintVersion")!=2)index=0;
         explored=Math.max(0,Math.min(8,n.getInt("Explored")));gatheringWood=n.getBoolean("GatheringWood")
             && (kind==Kind.BUILD_SHELTER || kind==Kind.FARM);
         status=n.getString("Status");

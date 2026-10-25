@@ -127,6 +127,32 @@ public final class CompanionTaskTests implements FabricGameTest {
         });
     }
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="projects",tickLimit=500)
+    public void farmerCraftsOneRealHoeAndThenPlantsWithoutCraftLoop(TestContext c){
+        CompanionEntity npc=worker(c);BlockPos soil=farmSoil(c);npc.autoCraft=true;
+        npc.backpack.setStack(0,new ItemStack(Items.DIAMOND_AXE));
+        npc.backpack.setStack(1,new ItemStack(Items.DIAMOND_PICKAXE));
+        npc.backpack.setStack(2,new ItemStack(Items.DIAMOND_SWORD));
+        npc.backpack.setStack(3,new ItemStack(Items.CRAFTING_TABLE));
+        npc.backpack.setStack(4,new ItemStack(Items.STICK,64));
+        npc.backpack.setStack(5,new ItemStack(Items.OAK_PLANKS,8));
+        npc.backpack.setStack(6,new ItemStack(Items.WHEAT_SEEDS,2));
+        npc.tasks().start(CompanionTasks.Kind.FARM);
+        c.runAtTick(420,()->{
+            int hoes=npc.backpack.count(Items.WOODEN_HOE)
+                +(npc.getMainHandStack().isOf(Items.WOODEN_HOE)?npc.getMainHandStack().getCount():0);
+            c.assertTrue(hoes==1,"Farmer failed to make exactly one hoe: "+hoes+" "+npc.tasks().status());
+            c.assertTrue(npc.backpack.count(Items.OAK_PLANKS)==6 && npc.backpack.count(Items.STICK)==62,
+                "Hoe crafting consumed extra ingredients or ignored the real recipe");
+            var crop=c.getWorld().getBlockState(c.getAbsolutePos(soil.up()));
+            c.assertTrue(crop.isOf(Blocks.WHEAT) && npc.backpack.count(Items.WHEAT_SEEDS)==1,
+                "Crafting never released the farmer to plant: "+npc.tasks().status());
+            ItemStack hoe=npc.getMainHandStack().isOf(Items.WOODEN_HOE)?npc.getMainHandStack():ItemStack.EMPTY;
+            for(int i=0;i<npc.backpack.size();i++)if(npc.backpack.getStack(i).isOf(Items.WOODEN_HOE))hoe=npc.backpack.getStack(i);
+            c.assertTrue(hoe.getDamage()==1,"The crafted hoe did not physically till the soil");
+            npc.tasks().cancel();c.complete();
+        });
+    }
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="projects",tickLimit=500)
     public void farmerPhysicallyCollectsMatureHarvestBeforeReplanting(TestContext c){
         CompanionEntity npc=worker(c);BlockPos soil=farmSoil(c),crop=c.getAbsolutePos(soil.up());
         npc.backpack.setStack(0,new ItemStack(Items.IRON_HOE));

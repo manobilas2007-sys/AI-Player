@@ -201,7 +201,7 @@ public final class StarterCrafting {
         // A farming order may request a real hoe; the same bench and resource
         // checks apply as for the existing tools. Seeds are never synthesized.
         if(npc.tasks().active() && npc.tasks().kind()==dev.aiplayer.ai.tasks.CompanionTasks.Kind.FARM
-                && best(HoeItem.class)==0 && count(Items.STICK)>=2){
+                && !dev.aiplayer.ai.brain.ResourcePlan.usable(npc,HoeItem.class) && count(Items.STICK)>=2){
             if(count(Items.DIAMOND)>=2)return recipe(Items.DIAMOND_HOE,Items.DIAMOND,2,2);
             if(count(Items.IRON_INGOT)>=2)return recipe(Items.IRON_HOE,Items.IRON_INGOT,2,2);
             if(count(Items.COBBLESTONE)>=2)return recipe(Items.STONE_HOE,Items.COBBLESTONE,2,2);
