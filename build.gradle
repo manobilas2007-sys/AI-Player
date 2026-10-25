@@ -2,13 +2,12 @@ plugins {
     id 'fabric-loom' version '1.6.12'
     id 'maven-publish'
 }
-version = '0.5.0-dev'
+version = '0.5.1-dev'
 group = 'dev.aiplayer'
 base { archivesName = 'ai-player' }
 repositories { mavenCentral() }
 dependencies {
     implementation project(':embedded-baritone')
-    include project(':embedded-baritone')
     modImplementation files('libs/FallingTree-1.20.1-4.3.4.jar')
     minecraft 'com.mojang:minecraft:1.20.1'
     mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
@@ -23,6 +22,9 @@ sourceSets {
     testmod {
         compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
         runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+    runtimeSmoke {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
     }
 }
 loom {
@@ -42,7 +44,36 @@ loom {
     }
 }
 
-// Keep the LGPL library replaceable inside the distribution and ship its notices.
+// Android launchers may discover a nested mod without exposing its classes to
+// the NPC. Put the independently built LGPL classes in the playable JAR itself.
+// Keep sources and the separate component JAR available for rebuilding/relinking.
+evaluationDependsOn(':embedded-baritone')
+tasks.named('jar', Jar) {
+    dependsOn project(':embedded-baritone').tasks.named('classes')
+    from(project(':embedded-baritone').sourceSets.main.output.classesDirs) {
+        include 'dev/aiplayer/baritone/**'
+    }
+}
 processResources {
     from('third-party/Baritone') { into 'META-INF/licenses/baritone' }
+    from('embedded-baritone/UPSTREAM.md') {
+        into 'META-INF/licenses/baritone'
+        rename { 'ADAPTATION.md' }
+    }
+}
+
+// A separate test-only mod exercises the remapped distributable on a real
+// production Fabric server. It is never included in the playable mod JAR.
+tasks.register('runtimeSmokeJar', Jar) {
+    dependsOn tasks.named('runtimeSmokeClasses')
+    from sourceSets.runtimeSmoke.output
+    archiveFileName = 'ai-player-runtime-smoke-dev.jar'
+    destinationDirectory = layout.buildDirectory.dir('runtime-smoke')
+}
+tasks.register('remapRuntimeSmokeJar', net.fabricmc.loom.task.RemapJarTask) {
+    dependsOn tasks.named('runtimeSmokeJar')
+    inputFile = tasks.named('runtimeSmokeJar').flatMap { it.archiveFile }
+    archiveFileName = 'ai-player-runtime-smoke.jar'
+    destinationDirectory = layout.buildDirectory.dir('runtime-smoke')
+    addNestedDependencies = false
 }

@@ -35,8 +35,11 @@ As declarações de direitos reservados do restante do projeto não restringem
 esses direitos. Veja `LICENSE.md` na raiz e as instruções de recompilação em
 `docs/INTEGRACAO_BARITONE.md`.
 
-O Baritone original não precisa ser instalado como mod separado. A biblioteca
-Java adaptada é incluída durante a construção do AI Player. O JAR completo
+O Baritone original não precisa ser instalado como mod separado. As classes
+da biblioteca Java adaptada são incluídas diretamente no JAR principal
+durante a construção do AI Player, sem registro de um mod interno separado.
+O módulo de fontes e seu binário não combinado continuam disponíveis para
+inspeção, modificação e recompilação da combinação. O JAR completo
 do mod Baritone enviado pelo usuário não é carregado nem redistribuído como
 se fosse uma implementação de inteligência do NPC.
 

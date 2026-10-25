@@ -16,6 +16,10 @@ arquivo, avisos de autoria e termos da LGPL permanecem aplicáveis às versões
 modificadas. Consulte `third-party/Baritone/NOTICE.md`, `LGPL-3.txt` e
 `GPL-3.txt`. Cópias desses documentos acompanham os binários distribuídos.
 
+A inclusão direta dessas classes no JAR principal não altera sua licença.
+O módulo-fonte e um binário separado da biblioteca continuam disponíveis,
+junto do código e dos scripts necessários para recompilar a combinação.
+
 Independentemente de qualquer aviso de direitos reservados do AI Player,
 os destinatários podem modificar o componente LGPL, realizar engenharia
 reversa da combinação para depurar essas modificações e recompilar ou

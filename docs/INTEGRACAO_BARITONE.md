@@ -1,15 +1,31 @@
-# AI Player 0.5.0-dev: Baritone adaptado ao NPC
+# AI Player 0.5.1-dev: Baritone adaptado ao NPC
 
 ## Arquitetura
 
 A integração utiliza os fontes de referência do Baritone 1.10.5, fixados no
 commit `8c55ad0721d42a01a359834edc16aaa9b5bc587d`, para uma biblioteca interna
 Java 17 em `embedded-baritone/`. O pacote adaptado é
-`dev.aiplayer.baritone`. O build inclui seu JAR dentro do JAR do AI Player,
-com o identificador Fabric `aiplayer_baritone_core` e a versão
-`1.10.5-npc.1`. O usuário não precisa instalar esse módulo nem o mod
-Baritone separadamente. Fabric API e FallingTree 4.3.4 continuam sendo as
-dependências utilizadas pelo AI Player.
+`dev.aiplayer.baritone`. O build inclui as classes da biblioteca diretamente
+no JAR principal do AI Player. O módulo de fontes e seu binário separado
+mantêm a versão `1.10.5-npc.1`, mas não são registrados como outro mod
+Fabric em tempo de execução. O usuário não precisa instalar esse módulo
+nem o mod Baritone separadamente. Fabric API e FallingTree 4.3.4 continuam
+sendo as dependências utilizadas pelo AI Player.
+
+### Correção de empacotamento no FCL
+
+O relato de execução no FCL registrou
+`NoClassDefFoundError: dev/aiplayer/baritone/Goal`: o núcleo aparecia na
+lista de mods, mas a classe não estava acessível ao código do AI Player.
+A versão 0.5.1-dev passa a incluir as classes `dev/aiplayer/baritone/`
+diretamente no JAR principal, sem JAR interno nem registro independente do
+núcleo pelo carregador de mods. Os fontes e scripts da biblioteca continuam
+separados para permitir sua substituição por recompilação.
+
+O verificador de distribuição e os GameTests avaliam o artefato gerado no
+ambiente do CI. Seus resultados não equivalem a uma execução no FCL; essa
+validação específica ainda precisa ser conferida, e nenhum resultado de CI
+é declarado aprovado antes de sua execução na revisão correspondente.
 
 O JAR do cliente Baritone não é simplesmente colocado dentro do AI Player:
 seus mixins e processos controlam um jogador cliente e não são um executor
@@ -160,17 +176,18 @@ upstream em `upstream/`, que não são compiladas como classes do mod.
 
 Para substituir a biblioteca, edite ou substitua os fontes de
 `embedded-baritone/`, preservando a interface pública usada pelo adaptador
-do NPC, e execute novamente o build da raiz. O Gradle combina a nova
-biblioteca com o AI Player. Não é necessário instalar o JAR original do
-Baritone, e não se exige assinatura do autor para executar essa combinação
+do NPC, e execute novamente o build da raiz. O Gradle inclui as classes da
+nova biblioteca no JAR principal do AI Player. Não é necessário instalar o
+JAR original do Baritone, e não se exige assinatura do autor para executar essa combinação
 modificada. Consulte `LICENSE.md` para a permissão explícita de modificação,
 depuração e recombinação das partes LGPL.
 
-O verificador `tools/check_embedded_baritone.py` confere que o JAR jogável
-tem a biblioteca interna, que ela não registra mixins nem entrypoints do
-cliente, que o Minecraft continua em 1.20.1 e que fontes e licenças estão
-presentes. Isso complementa os testes do núcleo Java e os GameTests; não
-substitui a validação dos efeitos físicos no mundo.
+O verificador `tools/check_embedded_baritone.py` confere a presença das
+classes do núcleo diretamente no JAR jogável, a ausência do registro
+aninhado do núcleo e de componentes do cliente Baritone, a versão Minecraft
+1.20.1 e a presença de fontes e licenças. Isso complementa os testes do núcleo
+Java e os GameTests; não substitui a validação dos efeitos físicos no mundo
+ou do carregador utilizado pelo FCL.
 
 ## Proveniência e distribuição
 
@@ -183,7 +200,13 @@ repositório.
 `third-party/Baritone/NOTICE.md`, `LGPL-3.txt`, `GPL-3.txt` e a imagem upstream
 `LICENSE-Part-2.jpg` acompanham a distribuição. Os avisos e licenças são
 incluídos no JAR em `META-INF/licenses/baritone/`. Os artefatos devem incluir
-os JARs de fontes da biblioteca e do AI Player, além dos binários.
+o binário separado da biblioteca, os JARs de fontes da biblioteca e do
+AI Player e os scripts de compilação, além do JAR principal jogável. O
+binário separado é uma forma inspecionável e recompilável da biblioteca,
+não uma dependência que o usuário precise instalar. Ele é uma biblioteca
+Java comum, sem `fabric.mod.json`, e não deve ser colocado na pasta `mods`.
+A substituição do componente se faz editando ou recompilando o módulo e
+reconstruindo o JAR principal, conforme as instruções acima.
 
 O núcleo derivado de Baritone é LGPL-3.0-or-later. O restante do projeto
 conserva seus próprios direitos. O estado específico de compilação e

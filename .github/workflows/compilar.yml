@@ -52,11 +52,11 @@ jobs:
       - name: Disponibilizar JAR
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Player-v0.5.0-JAR-and-sources
+          name: AI-Player-v0.5.1-FCL-fix-JAR-and-sources
           path: |
             dist/*.jar
             build/libs/*-sources.jar
-            embedded-baritone/build/libs/*-sources.jar
+            embedded-baritone/build/libs/*.jar
             embedded-baritone/build.gradle
             build.gradle
             settings.gradle
