@@ -76,7 +76,7 @@ public final class CompanionTasks {
     public String status(){return kind==Kind.BUILD_HOUSE?house.status():kind==Kind.CREATE_FARM || kind==Kind.TEND_FARM?farmProject.status():status;}
     public String diagnostics(){
         if(advancedActive())return kind+" progress="+progress()+" "+status()+" work="+projectWork.status()+" materials="+materials.status()
-            +(kind==Kind.BUILD_HOUSE?" "+house.diagnostics():"");
+            +(kind==Kind.BUILD_HOUSE?" "+house.diagnostics():" "+farmProject.diagnostics());
         Path path=npc.getNavigation().getCurrentPath();
         return "index="+index+" anchor="+anchor+" action="+actionTarget+" stance="+routeTarget
             +" point="+routePoint+" inside="+builderPositioned+" idle="+npc.getNavigation().isIdle()

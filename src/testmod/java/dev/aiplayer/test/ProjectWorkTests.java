@@ -13,11 +13,15 @@ import net.minecraft.block.SlabBlock;
 import net.minecraft.block.enums.SlabType;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.entity.ItemEntity;
+import net.minecraft.util.math.Box;
 import net.minecraft.test.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.world.RaycastContext;
 
 import java.util.UUID;
 
@@ -158,6 +162,67 @@ public final class ProjectWorkTests implements FabricGameTest {
             c.assertTrue(arrived[0],"Long route never physically reached its final segment: "+work.status()+" pos="+npc.getPos());
             c.assertTrue(npc.squaredDistanceTo(Vec3d.ofBottomCenter(destination))<0.65
                 && npc.getPos().squaredDistanceTo(initial)>60*60,"Intermediate waypoint counted as final arrival");c.complete();
+        });
+    }
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_work",tickLimit=220)
+    public void stepsOffOneBlockMoundBeforeMiningItsOwnSupport(TestContext c){
+        CompanionEntity npc=worker(c,new BlockPos(5,3,5));ProjectWork work=new ProjectWork(npc);
+        BlockPos mound=c.getAbsolutePos(new BlockPos(5,2,5));
+        c.getWorld().setBlockState(mound,Blocks.DIRT.getDefaultState());
+        npc.refreshPositionAndAngles(mound.getX()+0.5,mound.getY()+1,mound.getZ()+0.5,0,0);
+        npc.setVelocity(Vec3d.ZERO);Vec3d start=npc.getPos();Vec3d[] previous={start};boolean[] finished={false};
+        c.runAtEveryTick(()->{
+            c.assertTrue(npc.getPos().squaredDistanceTo(previous[0])<1,"Leaving the support teleported the actor");
+            previous[0]=npc.getPos();
+            if(!finished[0])finished[0]=work.safeMine(mound);
+            if(c.getWorld().getBlockState(mound).isAir()){
+                c.assertTrue(npc.getPos().squaredDistanceTo(start)>0.25,
+                    "Builder removed its support before physically moving off the mound");
+            }
+        });
+        c.runAtTick(180,()->{
+            c.assertTrue(finished[0] && c.getWorld().getBlockState(mound).isAir(),
+                "Builder could not leave its one-block mound: "+work.status()+" pos="+npc.getPos());
+            int drops=c.getWorld().getEntitiesByClass(ItemEntity.class,new Box(mound).expand(3),
+                e->e.isAlive() && e.getStack().isOf(Items.DIRT)).stream().mapToInt(e->e.getStack().getCount()).sum();
+            c.assertTrue(drops==1 && npc.backpack.count(Items.DIRT)==0,
+                "Mound preparation must spawn one real dirt drop instead of granting inventory items");
+            c.assertTrue(c.getWorld().getBlockState(mound.down()).isOf(Blocks.DIRT),"Builder mined deeper than the requested mound");
+            c.complete();
+        });
+    }
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_work",tickLimit=180)
+    public void shiftsFractionalStanceToPlaceTheSeventhFloorBlock(TestContext c){
+        CompanionEntity npc=worker(c,new BlockPos(15,2,19));ProjectWork work=new ProjectWork(npc);
+        BlockPos anchor=c.getAbsolutePos(new BlockPos(17,2,15)),target=anchor.add(0,0,6);
+        for(int z=0;z<6;z++){
+            BlockPos floor=anchor.add(0,0,z);c.getWorld().setBlockState(floor,Blocks.SPRUCE_PLANKS.getDefaultState());
+            OwnedBlocks.get(c.getWorld()).claim(floor,npc.getUuid());
+        }
+        npc.refreshPositionAndAngles(anchor.getX()-1.500667,anchor.getY(),anchor.getZ()+4.49758,0,0);
+        npc.setVelocity(Vec3d.ZERO);npc.backpack.setStack(0,new ItemStack(Items.SPRUCE_PLANKS));
+        Vec3d initial=npc.getPos();boolean[] armed={false},placed={false};Vec3d[] previous={initial};
+        c.runAtTick(5,()->{
+            var hit=c.getWorld().raycast(new RaycastContext(npc.getEyePos(),Vec3d.ofCenter(target),
+                RaycastContext.ShapeType.COLLIDER,RaycastContext.FluidHandling.NONE,npc));
+            c.assertTrue(hit.getType()!=HitResult.Type.MISS && hit.getBlockPos().equals(anchor.add(0,0,5)),
+                "Fixture did not reproduce the earlier floor occluding the fractional stance");
+            armed[0]=true;
+        });
+        c.runAtEveryTick(()->{
+            c.assertTrue(npc.getPos().squaredDistanceTo(previous[0])<1,"Work stance adjustment teleported the actor");
+            previous[0]=npc.getPos();
+            if(armed[0] && !placed[0])placed[0]=work.place(target,Blocks.SPRUCE_PLANKS.getDefaultState(),Items.SPRUCE_PLANKS,1);
+        });
+        c.runAtTick(140,()->{
+            c.assertTrue(placed[0] && c.getWorld().getBlockState(target).isOf(Blocks.SPRUCE_PLANKS),
+                "Builder stalled at the fractional floor corner: "+work.status()+" pos="+npc.getPos());
+            c.assertTrue(npc.backpack.count(Items.SPRUCE_PLANKS)==0
+                && OwnedBlocks.get(c.getWorld()).owned(target,npc.getUuid()),"Floor placement lost or duplicated its real material");
+            c.assertTrue(npc.getPos().squaredDistanceTo(initial)>0.00001,"Builder never physically shifted into a usable sight line");
+            for(int z=0;z<6;z++)c.assertTrue(c.getWorld().getBlockState(anchor.add(0,0,z)).isOf(Blocks.SPRUCE_PLANKS),
+                "Builder destroyed the previously completed floor to bypass its sight line");
+            c.complete();
         });
     }
 }

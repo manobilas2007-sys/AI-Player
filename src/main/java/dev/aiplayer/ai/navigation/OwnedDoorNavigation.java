@@ -72,7 +72,10 @@ public final class OwnedDoorNavigation {
             if(!world.isChunkLoaded(cell))return false;
             if(world.getBlockState(cell).getBlock() instanceof DoorBlock && ownedDoor(npc,world,cell)!=null){ownsDoor=true;break;}
         }
-        if(!actualCollision && !ownsDoor)return true;
+        // Door panels remain inside their own cells. Without an owned door
+        // in the swept body there is no alternate shape to model, so retain
+        // vanilla's answer instead of scanning all neighboring blocks again.
+        if(!ownsDoor)return !actualCollision;
         var body=VoxelShapes.cuboid(box);
         BlockPos min=BlockPos.ofFloored(box.minX-1,Math.max(world.getBottomY(),box.minY-1),box.minZ-1);
         BlockPos max=BlockPos.ofFloored(box.maxX+1,Math.min(world.getTopY()-1,box.maxY+1),box.maxZ+1);

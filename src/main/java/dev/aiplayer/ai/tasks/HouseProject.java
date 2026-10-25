@@ -59,7 +59,13 @@ public final class HouseProject {
         dimension=npc.getWorld().getRegistryKey().getValue().toString();
         active=true;phase=Phase.SURVEY;cursor=0;placed=0;
         materials.selectWood(palette.log(),palette.planks());
+        reserveTerrain();
         status="Conferir terreno do abrigo de "+palette.id();
+    }
+    private void reserveTerrain(){
+        if(anchor!=null && npc.getWorld() instanceof ServerWorld world)
+            materials.keepOut(new Box(anchor.getX(),world.getBottomY(),anchor.getZ()-2,
+                anchor.getX()+5,world.getTopY(),anchor.getZ()+8));
     }
     private HouseBlueprint.Palette choosePalette(){
         HouseBlueprint.Palette best=HouseBlueprint.palette("oak");int score=-1;
@@ -302,5 +308,6 @@ public final class HouseProject {
         cursor=Math.max(0,Math.min(512,n.getInt("Index")));placed=Math.max(0,Math.min(512,n.getInt("Placed")));
         status=n.getString("Status");active=phase!=Phase.DONE;
         materials.selectWood(palette.log(),palette.planks());
+        reserveTerrain();
     }
 }

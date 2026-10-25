@@ -34,9 +34,17 @@ public final class OwnedDoorNavigationTests implements FabricGameTest {
         BlockPos at=c.getAbsolutePos(new BlockPos(6,2,4));
         BlockState lower=block.getDefaultState().with(DoorBlock.FACING,Direction.EAST)
             .with(DoorBlock.HALF,DoubleBlockHalf.LOWER).with(DoorBlock.OPEN,false);
-        c.getWorld().setBlockState(at,lower,2);
-        c.getWorld().setBlockState(at.up(),lower.with(DoorBlock.HALF,DoubleBlockHalf.UPPER),2);
+        // Replace both halves atomically. Flag 2 alone still propagates
+        // neighbor-state changes: the old iron upper half would remove itself
+        // after seeing the new oak lower half, then remove that lower half.
+        int flags=Block.NOTIFY_LISTENERS | Block.FORCE_STATE;
+        c.getWorld().setBlockState(at,lower,flags);
+        c.getWorld().setBlockState(at.up(),lower.with(DoorBlock.HALF,DoubleBlockHalf.UPPER),flags);
         c.getWorld().updateNeighbors(at,block);c.getWorld().updateNeighbors(at.up(),block);
+        c.assertTrue(c.getWorld().getBlockState(at).isOf(block)
+            && c.getWorld().getBlockState(at.up()).isOf(block),"Door fixture did not retain both replacement halves");
+        c.assertFalse(c.getWorld().getBlockState(at).get(DoorBlock.OPEN)
+            || c.getWorld().getBlockState(at.up()).get(DoorBlock.OPEN),"Door fixture must start closed");
         if(own){OwnedBlocks.get(c.getWorld()).claim(at,npc.getUuid());OwnedBlocks.get(c.getWorld()).claim(at.up(),npc.getUuid());}
         else{OwnedBlocks.get(c.getWorld()).playerPlaced(c.getWorld(),at);OwnedBlocks.get(c.getWorld()).playerPlaced(c.getWorld(),at.up());}
         return at;

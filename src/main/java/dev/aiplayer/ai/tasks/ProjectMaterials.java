@@ -46,6 +46,7 @@ public final class ProjectMaterials {
     private Item log=Items.OAK_LOG,planks=Items.OAK_PLANKS;
     private Item miningFor,scanFor,crafting;
     private BlockPos target,scanOrigin,furnace,bench,preferredFurnace,preferredBench;
+    private Box worksite;
     private int scanRadius,scanY,scanEdge,craftTicks,scans,searchAt,targetSince,nextRoute;
     private int lastEnsure=-1;
     private double bestTargetDistance=Double.MAX_VALUE;
@@ -69,6 +70,9 @@ public final class ProjectMaterials {
     }
     public void preferFurnace(BlockPos pos){preferredFurnace=pos==null?null:pos.toImmutable();}
     public void preferWorkbench(BlockPos pos){preferredBench=pos==null?null:pos.toImmutable();}
+    /** Material prospecting must not dismantle the terrain the active project
+     * is preparing. Real drops from its explicit preparation remain usable. */
+    public void keepOut(Box area){worksite=area;}
     public BlockPos furnacePos(){return furnace;}
     public String status(){return status;}
     public int count(Item item){
@@ -79,6 +83,7 @@ public final class ProjectMaterials {
     public void pause(){mining.reset();npc.clearWorkingVisual();}
     public void cancel(){
         pause();target=null;scanFor=null;miningFor=null;crafting=null;craftTicks=0;
+        worksite=null;
         dropTarget=null;bestDropDistance=Double.MAX_VALUE;avoidedDrops.clear();lastEnsure=-1;
     }
 
@@ -300,6 +305,7 @@ public final class ProjectMaterials {
             :item==Items.DIRT?(state.isOf(Blocks.DIRT)||state.isOf(Blocks.GRASS_BLOCK)):false;
     }
     private boolean safeTarget(ServerWorld world,BlockPos pos,Item item){
+        if(worksite!=null && worksite.contains(Vec3d.ofCenter(pos)))return false;
         if(!world.isChunkLoaded(pos) || !matches(world.getBlockState(pos),item) || world.getBlockEntity(pos)!=null
                 || !world.getFluidState(pos).isEmpty() || OwnedBlocks.get(world).protectedBlock(pos)
                 || OwnedBlocks.get(world).claimed(pos) || npc.intelligence().memory().blocked(pos,world.getTime()))return false;

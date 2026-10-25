@@ -18,6 +18,7 @@ import net.minecraft.item.HoeItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.item.PickaxeItem;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtList;
 import net.minecraft.nbt.NbtElement;
@@ -70,6 +71,8 @@ public final class FarmProject {
     public boolean active(){return active;}
     public String status(){return status;}
     public int progress(){return create?completed:planted;}
+    public String diagnostics(){return "phase="+phase+" cursor="+cursor+" field="+fieldCursor
+        +" anchor="+anchor+" source="+source+" origin="+origin+" "+status;}
     public BlockPos origin(){return origin;}
     public int knownFields(){return fields.size();}
     public void start(boolean create,BlockPos orderOrigin){
@@ -93,6 +96,8 @@ public final class FarmProject {
     private void stationsOutsideFarm(){
         materials.preferWorkbench(anchor.add(-2,1,-3));
         materials.preferFurnace(anchor.add(-2,1,-1));
+        materials.keepOut(new Box(anchor.getX(),npc.getWorld().getBottomY(),anchor.getZ(),
+            anchor.getX()+SIZE,npc.getWorld().getTopY(),anchor.getZ()+SIZE));
     }
     public void cancel(){
         active=false;phase=Phase.DONE;origin=null;anchor=null;fields.clear();known.clear();cropSeeds.clear();avoidedSources.clear();
@@ -292,24 +297,59 @@ public final class FarmProject {
         if(cursor>=SIZE*SIZE*3){phase=Phase.FOUNDATION;cursor=0;return;}
         int layer=3-cursor/(SIZE*SIZE);BlockPos pos=cell(cursor%(SIZE*SIZE)).up(layer);
         if(world.getBlockState(pos).isAir()){cursor++;return;}
+        if(!prepareMining(world.getBlockState(pos)))return;
         if(work.safeMine(pos))cursor++;else status=work.status();
+    }
+    /** Terrain preparation has its own tool prerequisite, before the bucket
+     * dependency tree starts. A worn tool does not count as a replacement. */
+    private boolean prepareMining(BlockState state){
+        if(!state.isToolRequired() || state.isOf(Blocks.SNOW) || state.isOf(Blocks.SNOW_BLOCK))return true;
+        ItemStack held=npc.getMainHandStack();
+        if(held.getItem() instanceof PickaxeItem && !ResourcePlan.worn(held) && held.isSuitableFor(state))return true;
+        boolean suitable=false;
+        for(int i=0;i<npc.backpack.size();i++){
+            ItemStack stack=npc.backpack.getStack(i);
+            if(stack.getItem() instanceof PickaxeItem && !ResourcePlan.worn(stack) && stack.isSuitableFor(state)){
+                suitable=true;break;
+            }
+        }
+        if(suitable){
+            if(npc.autoEquip)return true;
+            status="Equipe a picareta utilizável antes de preparar este terreno";return false;
+        }
+        // ensure counts actual stacks, so request one additional pick if the
+        // only wooden picks are worn. Keep those stacks until the new recipe
+        // has really consumed ingredients and produced its replacement.
+        if(!materials.ensure(Items.WOODEN_PICKAXE,materials.count(Items.WOODEN_PICKAXE)+1))status=materials.status();
+        else status=npc.autoEquip?"Preparar picareta para remover o obstáculo natural":"Equipe a picareta fabricada para preparar o terreno";
+        return false;
     }
     private void foundation(ServerWorld world){
         if(cursor>=SIZE*SIZE){phase=Phase.GROUND;cursor=0;return;}
-        BlockPos ground=cell(cursor);int support=0;
+        BlockPos ground=cell(cursor);
+        // Existing natural ground supports the surface even over a cave.
+        // Only an actual hole needs paid fill. Water cells get their basin
+        // checked after excavation, when the NPC can physically reach it.
+        if(world.getBlockState(ground).isSolidBlock(world,ground)
+                || world.getBlockState(ground).isOf(Blocks.FARMLAND)){cursor++;return;}
+        if(supportBelow(world,ground))cursor++;
+    }
+    private boolean supportBelow(ServerWorld world,BlockPos ground){
+        int support=0;
         for(int depth=1;depth<=4;depth++){
             BlockPos below=ground.down(depth);
-            if(!world.isChunkLoaded(below)){status="Aguardar terreno carregado";return;}
+            if(!world.isChunkLoaded(below)){status="Aguardar terreno carregado";return false;}
             if(world.getBlockState(below).isSolidBlock(world,below)){support=depth;break;}
             if(!world.getBlockState(below).isAir()){
-                status="Preservar apoio que não pode ser aterrado";return;
+                status="Preservar apoio que não pode ser aterrado";return false;
             }
         }
-        if(support==0){status="Desnível sem apoio seguro para a plantação";return;}
-        if(support==1){cursor++;return;}
+        if(support==0){status="Desnível sem apoio seguro para a plantação";return false;}
+        if(support==1)return true;
         BlockPos missing=ground.down(support-1);
-        if(!materials.ensure(Items.DIRT,1)){status=materials.status();return;}
+        if(!materials.ensure(Items.DIRT,1)){status=materials.status();return false;}
         if(work.place(missing,Blocks.DIRT.getDefaultState(),Items.DIRT,1))completed++;else status=work.status();
+        return false;
     }
     private void ground(ServerWorld world){
         if(cursor>=SIZE*SIZE){phase=Phase.WATER;cursor=0;fields.clear();known.clear();return;}
@@ -322,6 +362,7 @@ public final class FarmProject {
         if(channel(pos)){cursor++;return;}
         if(state.isOf(wanted.getBlock()) && OwnedBlocks.get(world).owned(pos,npc.getUuid())){cursor++;return;}
         if(!state.isAir()){
+            if(!prepareMining(state))return;
             if(!work.safeMine(pos)){status=work.status();return;}
         }
         if(!materials.ensure(required,1)){status=materials.status();return;}
@@ -382,6 +423,13 @@ public final class FarmProject {
         }
         BlockPos pos=channels().get(cursor);
         if(stillWater(world,pos) && OwnedBlocks.get(world).owned(pos,npc.getUuid())){cursor++;return;}
+        // Prepare a watertight basin before draining a river source. An old
+        // saved layout with an air gap underneath pays for real fill here.
+        if(!world.getBlockState(pos).isAir() && !world.getBlockState(pos).isOf(Blocks.WATER)){
+            if(!prepareMining(world.getBlockState(pos)))return;
+            if(!work.safeMine(pos)){status=work.status();return;}
+        }
+        if(!editAllowed(world,pos) || !supportBelow(world,pos))return;
         if(materials.count(Items.WATER_BUCKET)==0){
             if(!materials.ensure(Items.BUCKET,1)){status=materials.status();return;}
             findWater(world);
@@ -406,11 +454,17 @@ public final class FarmProject {
             ItemStack remainder=npc.backpack.addStack(water);if(!remainder.isEmpty())npc.dropStack(remainder);
             source=null;doneAction();status="Levar o mesmo balde cheio até o canal";return;
         }
-        if(!world.getBlockState(pos).isAir() && !world.getBlockState(pos).isOf(Blocks.WATER)){
-            if(!work.safeMine(pos)){status=work.status();return;}
-        }
         if(!editAllowed(world,pos) || !world.getBlockState(pos.down()).isSolidBlock(world,pos.down())){
             status="Preservar terreno e apoio antes de colocar água";return;
+        }
+        for(net.minecraft.util.math.Direction side:net.minecraft.util.math.Direction.Type.HORIZONTAL){
+            BlockPos neighbor=pos.offset(side);
+            if(!world.isChunkLoaded(neighbor)
+                    || !(world.getBlockState(neighbor).isSolidBlock(world,neighbor)
+                        || world.getBlockState(neighbor).isOf(Blocks.FARMLAND)
+                        || (channel(neighbor) && world.getBlockState(neighbor).isOf(Blocks.WATER)))){
+                status="Reparar as laterais do canal antes de colocar água";return;
+            }
         }
         if(!work.approach(pos) || !delay(pos,8))return;
         if(materials.count(Items.WATER_BUCKET)==0)return;

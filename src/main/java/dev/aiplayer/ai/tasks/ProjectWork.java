@@ -103,8 +103,14 @@ public final class ProjectWork {
         for(Vec3d at:new Vec3d[]{center,center.add(dx,0,dz),center.add(dx,0,0),center.add(0,0,dz)}){
             double half=npc.getWidth()/2.0;
             Box body=new Box(at.x-half,at.y+0.001,at.z-half,at.x+half,at.y+npc.getHeight(),at.z+half);
+            Vec3d eyes=at.add(0,npc.getStandingEyeHeight(),0);
             if(!body.intersects(new Box(target)) && world().isSpaceEmpty(npc,body)
-                    && inReach(target,at.add(0,npc.getStandingEyeHeight(),0)))return at;
+                    && inReach(target,eyes)
+                    // Exact rays between two block corners can be clear only
+                    // at a mathematically perfect center. Require enough sight
+                    // margin for navigation's real fractional arrival point.
+                    && inReach(target,eyes.add(0.035,0,0)) && inReach(target,eyes.add(-0.035,0,0))
+                    && inReach(target,eyes.add(0,0,0.035)) && inReach(target,eyes.add(0,0,-0.035)))return at;
         }
         return null;
     }
@@ -246,11 +252,17 @@ public final class ProjectWork {
             mining.reset();status="Esperar ou sair do apoio antes de preparar terreno";
             var shape=state.getCollisionShape(world(),pos);
             double top=shape.isEmpty()?Double.NaN:pos.getY()+shape.getMax(Direction.Axis.Y);
-            if(Math.abs(npc.getY()-top)<0.16){
+            Box support=shape.isEmpty()?new Box(pos):shape.getBoundingBox().offset(pos.getX(),pos.getY(),pos.getZ());
+            Box body=npc.getBoundingBox();
+            if(Math.abs(npc.getY()-top)<0.16 && body.maxX>support.minX && body.minX<support.maxX
+                    && body.maxZ>support.minZ && body.minZ<support.maxZ){
                 BlockPos feet=BlockPos.ofFloored(npc.getX(),npc.getY()+0.5,npc.getZ());
-                for(Direction side:Direction.Type.HORIZONTAL){
-                    BlockPos away=feet.offset(side);
-                    if(standable(away)){moveTo(away);break;}
+                // A one-block mound has no supported adjacent cell at its top
+                // height. Leave it through an ordinary validated step down;
+                // never remove the block while the actor is still on it.
+                for(int drop:new int[]{0,1})for(Direction side:Direction.Type.HORIZONTAL){
+                    BlockPos away=feet.offset(side).down(drop);
+                    if(standable(away)){moveTo(away);return false;}
                 }
             }
             return false;

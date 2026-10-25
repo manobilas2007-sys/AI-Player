@@ -44,7 +44,7 @@ public final class CompanionDialogue {
             case TEND_FARM -> npc.tasks().startAt(CompanionTasks.Kind.TEND_FARM,origin,null);
             case CANCEL -> {npc.tasks().cancel();npc.gathering().cancel();}
             case FOLLOW -> {npc.tasks().cancel();npc.gathering().cancel();npc.setMode(Mode.FOLLOW);}
-            case STATUS -> sender.sendMessage(Text.literal("[AI Player] "+npc.intelligence().status()),false);
+            case STATUS -> sender.sendMessage(Text.literal("[AI Player] "+describe(npc)),false);
             case WOOD,STONE,FOOD,HUNT_FOOD -> {
                 npc.tasks().cancel();
                 npc.gathering().start(command.action()==PortugueseOrderParser.Action.WOOD?ResourceGathering.Kind.WOOD
@@ -60,6 +60,18 @@ public final class CompanionDialogue {
         synchronized(CONVERSATIONS){conversation=CONVERSATIONS.get(npc);}
         return conversation!=null && conversation.hasPending(owner.getUuid(),owner.getWorld().getRegistryKey().getValue().toString(),
             owner.getWorld().getTime());
+    }
+    private static String describe(CompanionEntity npc){
+        if(npc.tasks().active())return npc.tasks().status()+".";
+        if(npc.gathering().active()){
+            String resource=switch(npc.gathering().kind()){
+                case WOOD->"madeira";case STONE->"pedregulho";case FOOD->"comida";default->"materiais";
+            };
+            return "Estou buscando "+resource+": já recolhi "+npc.gathering().progress()+" de "+npc.gathering().goal()+".";
+        }
+        if(npc.isEating())return "Estou comendo para recuperar minha vida.";
+        if(npc.getTarget()!=null)return "Estou protegendo a gente de uma ameaça.";
+        return npc.mode()==Mode.WAIT?"Estou esperando sua próxima ordem.":"Estou acompanhando você e observando os recursos por perto.";
     }
     private static Item planks(String species){
         if(species==null)return null;
