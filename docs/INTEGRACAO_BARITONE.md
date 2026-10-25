@@ -68,7 +68,11 @@ de parede, vão de entrada com duas alturas e teto 5×5. O vão é uma abertura,
 não um bloco de porta. Cada bloco colocado consome uma tábua real; posições
 já concluídas e reconhecidas como próprias são preservadas ao retomar.
 A execução monta o piso, os quatro apoios de canto e o teto antes de
-fechar as paredes; o NPC trabalha de dentro do abrigo para manter acesso.\nO teto começa pelos quatro cantos e avança da borda para o centro para\npreservar a linha de visão.\nAo chegar, o NPC pode ajustar fisicamente sua posição dentro da mesma\ncélula validada; alcance, colisão e visibilidade reais continuam obrigatórios.
+fechar as paredes; o NPC trabalha de dentro do abrigo para manter acesso.
+O teto começa pelos quatro cantos e avança da borda para o centro para
+preservar a linha de visão.
+Ao chegar, o NPC pode ajustar fisicamente sua posição dentro da mesma
+célula validada; alcance, colisão e visibilidade reais continuam obrigatórios.
 
 O local começa próximo ao NPC e exige terreno carregado, apoio para os
 blocos, espaço livre e posições de trabalho alcançáveis. Blocos existentes
@@ -193,4 +197,8 @@ ferramentas e mineração e 21 cenários de navegação e projetos. O teste de
 borda do piso verifica uma rota física sem teletransporte. O cenário de
 item submerso zera apenas o impulso lateral aleatório da montagem do teste,
 preservando gravidade, flutuação, tempo limite e verificações originais.
-O plantio com fabricação automática também verifica que uma única enxada\nreal é produzida e utilizada, sem repetir a receita após sua conclusão.\nA retomada de um teto parcial salvo na posição fracionária da regressão\nverifica a conclusão com 48 blocos existentes e 32 tábuas restantes.\nOs resultados de execução pertencem à revisão identificada no Actions.
+O plantio com fabricação automática também verifica que uma única enxada
+real é produzida e utilizada, sem repetir a receita após sua conclusão.
+A retomada de um teto parcial salvo na posição fracionária da regressão
+verifica a conclusão com 48 blocos existentes e 32 tábuas restantes.
+Os resultados de execução pertencem à revisão identificada no Actions.
