@@ -62,6 +62,43 @@ public final class CompanionTaskTests implements FabricGameTest {
             c.complete();
         });
     }
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="projects",tickLimit=700)
+    public void shelterResumesPartialRoofFromFractionalInteriorPosition(TestContext c){
+        CompanionEntity npc=worker(c);
+        npc.tasks().start(CompanionTasks.Kind.BUILD_SHELTER);
+        // Real saved-world fixture: completed floor, posts and all but the
+        // last outer roof edge. Nothing is granted by the task executor.
+        for(int x=17;x<=21;x++)for(int z=15;z<=19;z++){
+            BlockPos p=c.getAbsolutePos(new BlockPos(x,2,z));
+            c.getWorld().setBlockState(p,Blocks.OAK_PLANKS.getDefaultState());
+            OwnedBlocks.get(c.getWorld()).claim(p,npc.getUuid());
+        }
+        for(int x:new int[]{17,21})for(int z:new int[]{15,19})for(int y=3;y<=4;y++){
+            BlockPos p=c.getAbsolutePos(new BlockPos(x,y,z));
+            c.getWorld().setBlockState(p,Blocks.OAK_PLANKS.getDefaultState());
+            OwnedBlocks.get(c.getWorld()).claim(p,npc.getUuid());
+        }
+        for(int x=17;x<=21;x++)for(int z=15;z<=19;z++){
+            if((x!=17 && x!=21 && z!=15 && z!=19) || (x==21 && z==18))continue;
+            BlockPos p=c.getAbsolutePos(new BlockPos(x,5,z));
+            c.getWorld().setBlockState(p,Blocks.OAK_PLANKS.getDefaultState());
+            OwnedBlocks.get(c.getWorld()).claim(p,npc.getUuid());
+        }
+        c.assertTrue(placed(c,npc)==48,"Partial-roof fixture must contain exactly 48 owned blocks");
+        npc.backpack.setStack(0,new ItemStack(Items.OAK_PLANKS,32));
+        NbtCompound saved=new NbtCompound();npc.tasks().writeNbt(saved);
+        saved.getCompound("CompanionProject").putInt("Index",48);
+        BlockPos feet=c.getAbsolutePos(new BlockPos(19,3,17));
+        npc.refreshPositionAndAngles(feet.getX()+0.544605,feet.getY(),feet.getZ()+0.570104,0,0);
+        npc.tasks().readNbt(saved);
+        c.runAtTick(600,()->{
+            c.assertFalse(npc.tasks().active(),"Resumed roof stalled at a fractional stance: "+npc.tasks().diagnostics());
+            c.assertTrue(placed(c,npc)==80 && plankCount(npc)==0,
+                "Resumed construction duplicated materials or lost existing blocks");
+            c.assertTrue(Math.abs(npc.getY()-feet.getY())<0.1,"Roof work left the supported interior floor");
+            c.complete();
+        });
+    }
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="projects",tickLimit=140)
     public void shelterPreservesProtectedObstructionAndMaterials(TestContext c){
         CompanionEntity npc=worker(c);npc.backpack.setStack(0,new ItemStack(Items.OAK_PLANKS,10));

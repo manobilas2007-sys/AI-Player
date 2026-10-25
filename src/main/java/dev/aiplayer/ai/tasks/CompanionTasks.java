@@ -52,7 +52,7 @@ public final class CompanionTasks {
     private final PhysicalMining mining;
     private Kind kind=Kind.NONE;
     private BlockPos anchor, actionTarget, pendingHarvest, routeTarget, routeAction;
-    private Vec3d routePosition;
+    private Vec3d routePosition, routePoint;
     private String dimension="", status="Sem projeto";
     private int index, actionTicks, nextRoute, retryAt, routeFailures, explored;
     private int materialRetryAt, exploreRetryAt, harvestSince, routeSince;
@@ -64,8 +64,13 @@ public final class CompanionTasks {
     public boolean active(){return kind!=Kind.NONE;}
     public Kind kind(){return kind;}
     public String status(){return status;}
-    public String diagnostics(){return "index="+index+" anchor="+anchor+" action="+actionTarget
-        +" stance="+routeTarget+" inside="+builderPositioned+" "+NpcPathfinder.diagnostics(npc);}
+    public String diagnostics(){
+        Path path=npc.getNavigation().getCurrentPath();
+        return "index="+index+" anchor="+anchor+" action="+actionTarget+" stance="+routeTarget
+            +" point="+routePoint+" inside="+builderPositioned+" idle="+npc.getNavigation().isIdle()
+            +" path="+(path==null?"none":path.getCurrentNodeIndex()+"/"+path.getLength()+" end="+path.getEnd())
+            +" "+NpcPathfinder.diagnostics(npc);
+    }
     public int progress(){return kind==Kind.EXPLORE?explored:index;}
 
     public void start(Kind requested){
@@ -82,13 +87,13 @@ public final class CompanionTasks {
         if(gatheringWood){npc.gathering().cancel();gatheringWood=false;}
         mining.reset();npc.getNavigation().stop();
         kind=Kind.NONE;anchor=null;fields.clear();actionTarget=null;pendingHarvest=null;actionTicks=0;plankSource=null;
-        routeTarget=null;routeAction=null;routePosition=null;builderPositioned=false;
+        routeTarget=null;routeAction=null;routePosition=null;routePoint=null;builderPositioned=false;
         index=0;explored=0;routeFailures=0;status="Projeto cancelado";
     }
     public void pause(){
         mining.reset();
         if(gatheringWood)npc.gathering().pause();
-        routeTarget=null;routeAction=null;routePosition=null;
+        routeTarget=null;routeAction=null;routePosition=null;routePoint=null;
         npc.clearWorkingVisual();
     }
     public void tick(){
@@ -131,41 +136,104 @@ public final class CompanionTasks {
             && world.isSpaceEmpty(npc,new Box(feet.getX()+0.2,feet.getY()+0.01,feet.getZ()+0.2,
                 feet.getX()+0.8,feet.getY()+1.8,feet.getZ()+0.8));
     }
+    private record Stance(BlockPos feet,Vec3d point) {}
+    private boolean workHazard(ServerWorld world,BlockPos pos){
+        BlockState state=world.getBlockState(pos);
+        return state.isOf(Blocks.LAVA) || state.isOf(Blocks.FIRE) || state.isOf(Blocks.SOUL_FIRE)
+            || state.isOf(Blocks.MAGMA_BLOCK) || state.isOf(Blocks.CACTUS) || state.isOf(Blocks.CAMPFIRE)
+            || state.isOf(Blocks.SOUL_CAMPFIRE) || state.isOf(Blocks.POWDER_SNOW)
+            || state.isOf(Blocks.WITHER_ROSE) || state.isOf(Blocks.SWEET_BERRY_BUSH);
+    }
+    private Vec3d stancePoint(ServerWorld world,BlockPos target,BlockPos feet){
+        if(!standable(world,feet))return null;
+        Vec3d center=Vec3d.ofBottomCenter(feet);
+        double dx=Math.signum(target.getX()-feet.getX())*0.18;
+        double dz=Math.signum(target.getZ()-feet.getZ())*0.18;
+        for(Vec3d point:new Vec3d[]{center,center.add(dx,0,dz),center.add(dx,0,0),center.add(0,0,dz)}){
+            double half=npc.getWidth()/2.0;
+            Box body=new Box(point.x-half,point.y+0.01,point.z-half,
+                point.x+half,point.y+npc.getHeight(),point.z+half);
+            Vec3d eyes=point.add(0,npc.getStandingEyeHeight(),0);
+            if(body.intersects(new Box(target)) || !world.isSpaceEmpty(npc,body) || !inReach(target,eyes))continue;
+            // Roof corners can offer only an exact diagonal ray between two
+            // already placed blocks. Require room for the real moving worker,
+            // rather than choosing a mathematically visible, unusable center.
+            if(kind==Kind.BUILD_SHELTER && target.getY()==anchor.getY()+3
+                    && (!inReach(target,eyes.add(0.035,0,0)) || !inReach(target,eyes.add(-0.035,0,0))
+                        || !inReach(target,eyes.add(0,0,0.035)) || !inReach(target,eyes.add(0,0,-0.035))))continue;
+            return point;
+        }
+        return null;
+    }
+    /** Finish the last fraction of a validated stance using ordinary collision
+     * and velocity. Navigation's 0.45-block arrival tolerance is too broad for
+     * construction sight lines; this never skips a route or changes height. */
+    private boolean centerOnStance(ServerWorld world,BlockPos feet,Vec3d point){
+        BlockPos actual=BlockPos.ofFloored(npc.getX(),npc.getY()+0.5,npc.getZ());
+        if(point==null || !npc.isOnGround() || !actual.equals(feet)
+                || Math.abs(npc.getY()-point.y)>0.12 || !standable(world,feet))return false;
+        double dx=point.x-npc.getX(),dz=point.z-npc.getZ();
+        double distance=Math.sqrt(dx*dx+dz*dz);
+        if(distance<0.01)return false;
+        Box swept=npc.getBoundingBox().stretch(dx,0,dz);
+        if(!world.isSpaceEmpty(npc,swept))return false;
+        for(BlockPos cell:BlockPos.iterate(BlockPos.ofFloored(swept.minX,swept.minY+0.001,swept.minZ),
+                BlockPos.ofFloored(swept.maxX-0.001,swept.maxY-0.001,swept.maxZ-0.001))){
+            BlockPos footing=new BlockPos(cell.getX(),feet.getY(),cell.getZ());
+            if(!world.isChunkLoaded(cell) || !world.getFluidState(cell).isEmpty()
+                    || workHazard(world,cell) || workHazard(world,footing.down())
+                    || !WorkNavigation.safeWorkFooting(npc,footing))return false;
+        }
+        npc.getNavigation().stop();
+        npc.getMoveControl().moveTo(npc.getX(),npc.getY(),npc.getZ(),0);
+        npc.setForwardSpeed(0);npc.setSidewaysSpeed(0);
+        double motion=Math.min(0.08,Math.max(0.012,distance*0.4));
+        npc.setVelocity(dx/distance*motion,npc.getVelocity().y,dz/distance*motion);
+        return true;
+    }
     private boolean approach(ServerWorld world,BlockPos target){
         // Never place a block through the worker's body. Move to a real stance
         // before construction or before tilling the soil under the future crop.
         if(!npc.getBoundingBox().intersects(new Box(target)) && inReach(target,npc.getEyePos())){
-            npc.getNavigation().stop();routeFailures=0;routeTarget=null;routeAction=null;return true;
+            npc.getNavigation().stop();routeFailures=0;routeTarget=null;routeAction=null;routePoint=null;return true;
         }
         // A functioning route owns movement until it reaches a useful stance.
         // Replacing it every few ticks can strand the worker at floor edges.
-        if(routeTarget!=null && target.equals(routeAction) && standable(world,routeTarget)
-                && !npc.getNavigation().isIdle()){
-            if(routePosition==null || npc.getPos().squaredDistanceTo(routePosition)>0.25){
-                routePosition=npc.getPos();routeSince=npc.age;
+        if(routeTarget!=null && target.equals(routeAction) && standable(world,routeTarget)){
+            if(centerOnStance(world,routeTarget,routePoint))return false;
+            if(!npc.getNavigation().isIdle()){
+                if(routePosition==null || npc.getPos().squaredDistanceTo(routePosition)>0.25){
+                    routePosition=npc.getPos();routeSince=npc.age;
+                }
+                if(npc.age-routeSince<50)return false;
             }
-            if(npc.age-routeSince<50)return false;
         }
-        routeTarget=null;routeAction=null;
+        routeTarget=null;routeAction=null;routePoint=null;
         if(npc.age<nextRoute)return false;
         nextRoute=npc.age+12;
-        List<BlockPos> options=new ArrayList<>();
+        List<Stance> options=new ArrayList<>();
         for(int dy:new int[]{0,1,-1})for(int radius=0;radius<=3;radius++)
             for(int dx=-radius;dx<=radius;dx++)for(int dz=-radius;dz<=radius;dz++){
                 if(Math.max(Math.abs(dx),Math.abs(dz))!=radius)continue;
                 BlockPos feet=new BlockPos(target.getX()+dx,npc.getBlockY()+dy,target.getZ()+dz);
                 if(kind==Kind.BUILD_SHELTER && index>=25 && !interiorStance(feet))continue;
-                Box body=new Box(feet.getX()+0.2,feet.getY()+0.01,feet.getZ()+0.2,
-                    feet.getX()+0.8,feet.getY()+1.8,feet.getZ()+0.8);
-                if(!body.intersects(new Box(target)) && standable(world,feet)
-                        && inReach(target,Vec3d.ofBottomCenter(feet).add(0,npc.getStandingEyeHeight(),0)))options.add(feet);
+                Vec3d point=stancePoint(world,target,feet);
+                if(point!=null)options.add(new Stance(feet,point));
             }
-        options.sort(Comparator.comparingDouble(p->p.getSquaredDistance(npc.getBlockPos())));
+        options.sort(Comparator.comparingDouble(p->p.feet().getSquaredDistance(npc.getBlockPos())));
         for(int i=0;i<Math.min(8,options.size());i++){
-            Path path=WorkNavigation.findPath(npc,options.get(i),0);
-            if(path!=null && WorkNavigation.surfacePath(npc,path,options.get(i).getY())
-                    && npc.getNavigation().startMovingAlong(path,1.0)){
-                routeTarget=options.get(i).toImmutable();routeAction=target.toImmutable();
+            Stance stance=options.get(i);
+            if(centerOnStance(world,stance.feet(),stance.point())){
+                routeTarget=stance.feet().toImmutable();routeAction=target.toImmutable();
+                routePoint=stance.point();routePosition=npc.getPos();routeSince=npc.age;return false;
+            }
+            Path path=WorkNavigation.findPath(npc,stance.feet(),0);
+            if(path!=null && WorkNavigation.surfacePath(npc,path,stance.feet().getY())){
+                // Vanilla retains a finished equivalent path instead of
+                // replacing it. Explicitly discard it for a deliberate retry.
+                npc.getNavigation().stop();
+                if(!npc.getNavigation().startMovingAlong(path,1.0))continue;
+                routeTarget=stance.feet().toImmutable();routeAction=target.toImmutable();routePoint=stance.point();
                 routePosition=npc.getPos();routeSince=npc.age;return false;
             }
         }
@@ -178,7 +246,7 @@ public final class CompanionTasks {
         npc.markWorking();npc.getLookControl().lookAt(target.getX()+0.5,target.getY()+0.5,target.getZ()+0.5,30,30);
         return ++actionTicks>=ticks;
     }
-    private void actionDone(){actionTarget=null;actionTicks=0;plankSource=null;routeTarget=null;routeAction=null;}
+    private void actionDone(){actionTarget=null;actionTicks=0;plankSource=null;routeTarget=null;routeAction=null;routePoint=null;}
 
     private boolean interiorStance(BlockPos feet){
         return feet.getY()==anchor.getY()+1 && feet.getX()>=anchor.getX()+1 && feet.getX()<=anchor.getX()+3
@@ -189,7 +257,7 @@ public final class CompanionTasks {
         if(builderPositioned && interiorStance(npc.getBlockPos()))return true;
         builderPositioned=false;
         if(npc.squaredDistanceTo(Vec3d.ofBottomCenter(center))<=0.6*0.6){
-            builderPositioned=true;npc.getNavigation().stop();routeTarget=null;routeAction=null;return true;
+            builderPositioned=true;npc.getNavigation().stop();routeTarget=null;routeAction=null;routePoint=null;return true;
         }
         status="Entrar no abrigo antes de colocar teto e paredes";
         if(routeTarget!=null && routeTarget.equals(center) && !npc.getNavigation().isIdle()){
@@ -202,9 +270,11 @@ public final class CompanionTasks {
         nextRoute=npc.age+12;
         if(!standable(world,center))return false;
         Path path=WorkNavigation.findPath(npc,center,0);
-        if(path!=null && WorkNavigation.surfacePath(npc,path,center.getY())
-                && npc.getNavigation().startMovingAlong(path,1.0)){
-            routeTarget=center;routeAction=null;routePosition=npc.getPos();routeSince=npc.age;
+        if(path!=null && WorkNavigation.surfacePath(npc,path,center.getY())){
+            npc.getNavigation().stop();
+            if(npc.getNavigation().startMovingAlong(path,1.0)){
+                routeTarget=center;routeAction=null;routePoint=null;routePosition=npc.getPos();routeSince=npc.age;
+            }
         }
         return false;
     }
@@ -215,10 +285,12 @@ public final class CompanionTasks {
         List<BlockPos> blocks=new ArrayList<>(80);
         for(int x=0;x<5;x++)for(int z=0;z<5;z++)blocks.add(anchor.add(x,0,z));
         for(int x:new int[]{0,4})for(int z:new int[]{0,4})for(int y=1;y<=2;y++)blocks.add(anchor.add(x,y,z));
-        // Roof the outer rim first, then work inward. A completed inner row
-        // would hide the outer block's center from every interior stance.
+        // Cap the four posts before either neighboring roof edge closes its
+        // sight line, then roof the outer rim and work inward.
+        for(int x:new int[]{0,4})for(int z:new int[]{0,4})blocks.add(anchor.add(x,3,z));
         for(int radius=2;radius>=0;radius--)for(int x=0;x<5;x++)for(int z=0;z<5;z++)
-            if(Math.max(Math.abs(x-2),Math.abs(z-2))==radius)blocks.add(anchor.add(x,3,z));
+            if(Math.max(Math.abs(x-2),Math.abs(z-2))==radius
+                    && !((x==0 || x==4) && (z==0 || z==4)))blocks.add(anchor.add(x,3,z));
         for(int y=1;y<=2;y++)for(int x=0;x<5;x++)for(int z=0;z<5;z++)
             if((x==0 || x==4 || z==0 || z==4) && !(x==2 && z==0)
                     && !((x==0 || x==4) && (z==0 || z==4)))blocks.add(anchor.add(x,y,z));
@@ -465,7 +537,7 @@ public final class CompanionTasks {
         NbtCompound n=new NbtCompound();n.putString("Kind",kind.name());n.putString("Dimension",dimension);
         if(anchor!=null)n.putLong("Anchor",anchor.asLong());n.putInt("Index",index);n.putInt("Explored",explored);
         n.putBoolean("GatheringWood",gatheringWood);n.putString("Status",status);
-        n.putInt("BlueprintVersion",2);
+        n.putInt("BlueprintVersion",3);
         if(pendingHarvest!=null)n.putLong("PendingHarvest",pendingHarvest.asLong());
         n.putLongArray("Fields",fields.stream().mapToLong(BlockPos::asLong).toArray());
         root.put("CompanionProject",n);
@@ -485,7 +557,7 @@ public final class CompanionTasks {
         index=Math.max(0,Math.min(kind==Kind.BUILD_SHELTER?80:kind==Kind.EXPLORE?8:9,n.getInt("Index")));
         // Older in-progress blueprints used a different placement order. Scan
         // them again; already owned blocks are retained and consume no items.
-        if(kind==Kind.BUILD_SHELTER && n.getInt("BlueprintVersion")!=2)index=0;
+        if(kind==Kind.BUILD_SHELTER && n.getInt("BlueprintVersion")!=3)index=0;
         explored=Math.max(0,Math.min(8,n.getInt("Explored")));gatheringWood=n.getBoolean("GatheringWood")
             && (kind==Kind.BUILD_SHELTER || kind==Kind.FARM);
         status=n.getString("Status");
