@@ -72,6 +72,7 @@ tasks.register('runtimeSmokeJar', Jar) {
 }
 tasks.register('remapRuntimeSmokeJar', net.fabricmc.loom.task.RemapJarTask) {
     dependsOn tasks.named('runtimeSmokeJar')
+    classpath.from(sourceSets.runtimeSmoke.compileClasspath)
     inputFile = tasks.named('runtimeSmokeJar').flatMap { it.archiveFile }
     archiveFileName = 'ai-player-runtime-smoke.jar'
     destinationDirectory = layout.buildDirectory.dir('runtime-smoke')
