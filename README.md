@@ -6,6 +6,8 @@ Converse com seu NPC pelo chat normal. O interpretador local aceita sinônimos, 
 
 A versão 0.6.1 corrige o início de projetos sem materiais: troncos acessíveis cercados por grama entram na busca, a vegetação é removida antes de colocar estações e o projeto controla suas receitas e ferramentas. Os ingredientes do machado ficam reservados até a fabricação terminar, antes de retomar a obra. Os testes completos de abrigo e plantação começam com inventário e mão vazios, usando recursos naturais próximos, e exigem a fabricação e o uso real do machado.
 
+O retorno à obra permite ajustar a posição na beirada do piso já construído. Picaretas gastas não satisfazem a necessidade de uma ferramenta utilizável, e recuperar uma bancada já quebrada não interrompe uma expedição de pedra em andamento.
+
 ## Exemplos de diálogo
 
 - **“Construa uma casa”**: o NPC apresenta os modelos disponíveis. Nesta versão existe o abrigo de madeira detalhado. Após escolher, ele confirma o local e a madeira antes de começar.
