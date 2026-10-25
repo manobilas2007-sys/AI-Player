@@ -41,6 +41,19 @@ public final class ProjectWork {
 
     public ProjectWork(CompanionEntity npc){this.npc=npc;mining=new PhysicalMining(npc);}
     public String status(){return status;}
+    public String diagnostics(){
+        Path path=npc.getNavigation().getCurrentPath();
+        String sight="none";
+        if(goal!=null){
+            var hit=npc.getWorld().raycast(new RaycastContext(npc.getEyePos(),Vec3d.ofCenter(goal),
+                RaycastContext.ShapeType.COLLIDER,RaycastContext.FluidHandling.NONE,npc));
+            sight=hit.getType()==HitResult.Type.MISS?"clear":hit.getBlockPos().toShortString();
+        }
+        return "work="+status+" goal="+goal+" stance="+stance+" point="+point+" purpose="+purpose
+            +" path="+(path==null?"none":path.getCurrentNodeIndex()+"/"+path.getLength()+" end="+path.getEnd())
+            +" idle="+npc.getNavigation().isIdle()+" onGround="+npc.isOnGround()+" pos="+npc.getPos()
+            +" sight="+sight+" stalled="+(npc.age-stagnantSince)+" routeIn="+Math.max(0,nextRoute-npc.age);
+    }
     /** Horizontal area around the original order; height is checked separately. */
     public void setBoundary(BlockPos origin,int radius){boundary=origin.toImmutable();this.radius=Math.max(1,Math.min(100,radius));resetRoute();}
     public void clearBoundary(){boundary=null;radius=0;resetRoute();}
@@ -123,9 +136,14 @@ public final class ProjectWork {
         Box sweep=npc.getBoundingBox().stretch(dx,0,dz);
         for(BlockPos cell:BlockPos.iterate(BlockPos.ofFloored(sweep.minX,sweep.minY+0.001,sweep.minZ),
                 BlockPos.ofFloored(sweep.maxX-0.001,sweep.maxY-0.001,sweep.maxZ-0.001))){
-            if(!allowed(cell) || hazard(cell) || !world().getFluidState(cell).isEmpty()
-                    || !WorkNavigation.safeWorkFooting(npc,new BlockPos(cell.getX(),feet.getY(),cell.getZ())))return false;
+            if(!allowed(cell) || hazard(cell) || !world().getFluidState(cell).isEmpty())return false;
         }
+        // Both centers are within this same supported feet cell. A grounded
+        // actor may already overhang the edge of a raised floor; requiring
+        // equal-height ground under that existing overhang rejects a safe
+        // inward adjustment and leaves a one-node path unable to finish it.
+        // standable(feet) validates the destination, while this complete swept
+        // body still has to be collision-, fluid- and hazard-free.
         if(!world().isSpaceEmpty(npc,sweep))return false;
         npc.getNavigation().stop();npc.getMoveControl().moveTo(npc.getX(),npc.getY(),npc.getZ(),0);
         npc.setForwardSpeed(0);npc.setSidewaysSpeed(0);

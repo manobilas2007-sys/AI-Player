@@ -77,6 +77,32 @@ public final class ProjectMaterials {
     public void keepOut(Box area){worksite=area;}
     public BlockPos furnacePos(){return furnace;}
     public String status(){return status;}
+    public String diagnostics(){
+        String targetState="none",drop="none";
+        if(npc.getWorld() instanceof ServerWorld world){
+            if(target!=null)targetState=world.isChunkLoaded(target)?world.getBlockState(target).toString():"unloaded";
+            if(dropTarget!=null){
+                var entity=world.getEntity(dropTarget);
+                drop=entity instanceof ItemEntity item?item.getStack()+"@"+item.getPos():"missing:"+dropTarget;
+            }
+        }
+        ItemStack held=npc.getMainHandStack();
+        String allowedHand=target==null || npc.getWorld().isChunkLoaded(target)?Boolean.toString(allowedTool(held)):"unloaded";
+        String picks="";
+        for(int i=0;i<npc.backpack.size();i++){
+            ItemStack stack=npc.backpack.getStack(i);
+            if(stack.getItem() instanceof PickaxeItem)picks+=" "+i+":"+stack+"("+stack.getDamage()+"/"+stack.getMaxDamage()+")";
+        }
+        return "materialTarget="+target+" state="+targetState+" for="+itemId(miningFor)
+            +" targetAge="+(npc.age-targetSince)+" best="+bestTargetDistance
+            +" mining="+mining.target()+"/"+mining.hasProgress()+" hand="+held+"("+held.getDamage()+"/"+held.getMaxDamage()+")"
+            +" allowedHand="+allowedHand+" picks="+picks
+            +" scan="+itemId(scanFor)+"@"+scanOrigin+":"+scanRadius+","+scanY+","+scanEdge
+            +" searchWait="+(searchAt-npc.age)+" drop="+drop+" dropAge="+(npc.age-dropProgressAt)
+            +" recipe="+itemId(crafting)+":"+craftTicks+" axePending="+axePending+" woodReceived="+woodReceived
+            +" bench="+bench+" preferredBench="+preferredBench+" furnace="+furnace+" preferredFurnace="+preferredFurnace;
+    }
+    private String itemId(Item item){return item==null?"none":Registries.ITEM.getId(item).toString();}
     public int count(Item item){
         int result=npc.backpack.count(item);
         if(npc.getMainHandStack().isOf(item))result+=npc.getMainHandStack().getCount();
@@ -428,7 +454,10 @@ public final class ProjectMaterials {
         BlockState required=item==Items.RAW_IRON?Blocks.IRON_ORE.getDefaultState():Blocks.STONE.getDefaultState();
         if((item==Items.COBBLESTONE || item==Items.COAL || item==Items.RAW_IRON) && !suitablePick(required)){
             if(!npc.autoEquip){status="Equipe uma picareta adequada ou ative equipamento automático";return false;}
-            if(!ensure(world,item==Items.RAW_IRON?Items.STONE_PICKAXE:Items.WOODEN_PICKAXE,1,depth+1))return false;
+            Item replacement=item==Items.RAW_IRON?Items.STONE_PICKAXE:Items.WOODEN_PICKAXE;
+            // A worn stack is still an item but cannot satisfy this mining
+            // prerequisite. Require an additional actual pick before mining.
+            if(!ensure(world,replacement,count(replacement)+1,depth+1))return false;
         }
         if(target!=null && (miningFor!=item || !safeTarget(world,target,item))){target=null;mining.reset();}
         if(target!=null){

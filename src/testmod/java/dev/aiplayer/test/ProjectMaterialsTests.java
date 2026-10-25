@@ -353,4 +353,34 @@ public final class ProjectMaterialsTests implements FabricGameTest {
             c.assertTrue(materials.count(Items.STONE_PICKAXE)==1,"Required stone pickaxe was not retained");c.complete();
         });
     }
+
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=220)
+    public void wornPickDoesNotSatisfyTheMiningPrerequisite(TestContext c){
+        CompanionEntity npc=worker(c);ProjectMaterials materials=materials(npc);bench(c);
+        BlockPos stone=c.getAbsolutePos(new BlockPos(4,2,4));
+        c.getWorld().setBlockState(stone,Blocks.STONE.getDefaultState());
+        ItemStack worn=new ItemStack(Items.WOODEN_PICKAXE);worn.setDamage(worn.getMaxDamage()-1);
+        npc.backpack.setStack(0,worn);
+        npc.backpack.setStack(1,new ItemStack(Items.OAK_PLANKS,3));
+        npc.backpack.setStack(2,new ItemStack(Items.STICK,2));
+        c.runAtEveryTick(()->materials.ensure(Items.COBBLESTONE,1));
+        c.runAtTick(70,()->{
+            c.assertTrue(c.getWorld().getBlockState(stone).isAir(),
+                "Existing worn pick starved its actual replacement: "+materials.status()+" "+materials.diagnostics());
+            c.assertTrue(materials.count(Items.COBBLESTONE)==0 && !c.getWorld().getEntitiesByClass(ItemEntity.class,new Box(stone).expand(3),
+                    e->e.isAlive() && e.getStack().isOf(Items.COBBLESTONE)
+                        && e.getCommandTags().contains("aiplayer_drop_"+npc.getUuid())).isEmpty(),
+                "Replacement pick did not produce a real stone drop before physical pickup");
+            owner(npc);
+        });
+        c.runAtTick(160,()->{
+            c.assertTrue(materials.count(Items.COBBLESTONE)==1,"Replacement pick's real drop was not picked up");
+            c.assertTrue(materials.count(Items.WOODEN_PICKAXE)==2
+                    && dev.aiplayer.ai.brain.ResourcePlan.usable(npc,net.minecraft.item.PickaxeItem.class),
+                "No additional usable pick was crafted while preserving the old worn stack");
+            c.assertTrue(materials.count(Items.OAK_PLANKS)==0 && materials.count(Items.STICK)==0,
+                "Replacement pick did not consume exactly three planks and two sticks");
+            c.assertTrue(worn.getDamage()==worn.getMaxDamage()-1,"Project mined with its worn pick");c.complete();
+        });
+    }
 }

@@ -54,6 +54,13 @@ public final class StarterCrafting {
      * stick or bench recipes must not interrupt a committed mining route. */
     public boolean canCraftStoneUpgradeNow(){
         if(!npc.autoCraft || npc.age<retryAt)return false;
+        // A broken table is a cleanup drop, not an available crafting station.
+        // tick() would pursue that drop before choosing any recipe. During a
+        // stone expedition this can leave the cave and cancel unfinished work;
+        // finish the collection before resuming that optional recovery instead.
+        if(isReclaiming() && (!ownBench || benchPos==null
+                || !npc.getWorld().isChunkLoaded(benchPos)
+                || !npc.getWorld().getBlockState(benchPos).isOf(Blocks.CRAFTING_TABLE)))return false;
         return tryTools(Items.COBBLESTONE,2,Items.STONE_PICKAXE,Items.STONE_AXE,Items.STONE_SWORD)!=null;
     }
     public String description(){return reclaiming?"Recuperar bancada":pending==null?"Conferir ingredientes":Registries.ITEM.getId(pending.result).toString();}

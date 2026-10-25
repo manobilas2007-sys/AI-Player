@@ -229,4 +229,45 @@ public final class ProjectWorkTests implements FabricGameTest {
             c.complete();
         });
     }
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_work",tickLimit=180)
+    public void centersInwardFromRaisedFloorOverhangBeforeExtendingItsLastColumn(TestContext c){
+        CompanionEntity npc=worker(c,new BlockPos(20,3,15));ProjectWork work=new ProjectWork(npc);
+        BlockPos anchor=c.getAbsolutePos(new BlockPos(17,2,15)),target=anchor.add(4,0,2);
+        for(int i=0;i<30;i++){
+            BlockPos floor=anchor.add(i/7,0,i%7);
+            c.getWorld().setBlockState(floor,Blocks.OAK_PLANKS.getDefaultState());
+            OwnedBlocks.get(c.getWorld()).claim(floor,npc.getUuid());
+        }
+        // Returning from resource collection can put the worker partly over
+        // the front edge. The real ground outside is one block lower.
+        npc.refreshPositionAndAngles(anchor.getX()+3.4752616878774,anchor.getY()+1,
+            anchor.getZ()+0.22296820053575,0,0);
+        npc.setVelocity(Vec3d.ZERO);npc.backpack.setStack(0,new ItemStack(Items.OAK_PLANKS,2));
+        Vec3d initial=npc.getPos();Vec3d[] previous={initial};boolean[] armed={false},placed={false};
+        c.runAtTick(5,()->{
+            var hit=c.getWorld().raycast(new RaycastContext(npc.getEyePos(),Vec3d.ofCenter(target),
+                RaycastContext.ShapeType.COLLIDER,RaycastContext.FluidHandling.NONE,npc));
+            c.assertTrue(npc.isOnGround() && npc.getBoundingBox().minZ<anchor.getZ(),
+                "Fixture did not retain its grounded floor-edge overhang");
+            c.assertTrue(hit.getType()!=HitResult.Type.MISS && hit.getBlockPos().equals(anchor.add(4,0,1)),
+                "Fixture did not reproduce the completed floor obscuring the next part");
+            armed[0]=true;
+        });
+        c.runAtEveryTick(()->{
+            c.assertTrue(npc.getPos().squaredDistanceTo(previous[0])<1,"Floor-edge centering teleported the actor");
+            previous[0]=npc.getPos();
+            if(armed[0] && !placed[0])placed[0]=work.place(target,Blocks.OAK_PLANKS.getDefaultState(),Items.OAK_PLANKS,1);
+        });
+        c.runAtTick(140,()->{
+            c.assertTrue(placed[0] && c.getWorld().getBlockState(target).isOf(Blocks.OAK_PLANKS),
+                "Worker did not center inward from its floor overhang: "+work.diagnostics());
+            c.assertTrue(npc.backpack.count(Items.OAK_PLANKS)==1
+                    && OwnedBlocks.get(c.getWorld()).owned(target,npc.getUuid()),
+                "Edge placement did not consume and claim exactly one real plank");
+            c.assertTrue(npc.getPos().squaredDistanceTo(initial)>0.00001,"Worker never physically adjusted its stance");
+            for(int i=0;i<30;i++)c.assertTrue(c.getWorld().getBlockState(anchor.add(i/7,0,i%7)).isOf(Blocks.OAK_PLANKS),
+                "Worker removed completed floor to bypass its overhang");
+            c.complete();
+        });
+    }
 }

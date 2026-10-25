@@ -143,6 +143,42 @@ public class SurfaceMiningTests implements FabricGameTest {
             owner.discard();c.complete();
         });
     }
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="surface",tickLimit=1100)
+    public void brokenBenchDropCannotInterruptStoneExpedition(TestContext c){
+        CompanionEntity a=worker(c);a.autoCraft=true;a.setMode(Mode.GUARD);
+        // The next upgrade is affordable, but the old station has already
+        // become a real drop outside the covered work area. A cleanup detour
+        // must not replace the still-active expedition with a crafting turn.
+        Item[] items={Items.WOODEN_PICKAXE,Items.WOODEN_AXE,Items.STONE_SWORD,
+            Items.COBBLESTONE,Items.OAK_PLANKS,Items.STICK};
+        int[] counts={1,1,1,3,8,6};
+        for(int i=0;i<items.length;i++)a.backpack.setStack(i,new ItemStack(items[i],counts[i]));
+        BlockPos bench=c.getAbsolutePos(new BlockPos(3,2,0));
+        NbtCompound owned=new NbtCompound();owned.putLong("OwnedBench",bench.asLong());
+        a.crafting().readNbt(owned);
+        ItemEntity drop=new ItemEntity(c.getWorld(),bench.getX()+0.5,bench.getY()-2,bench.getZ()-1.5,
+            new ItemStack(Items.CRAFTING_TABLE));
+        drop.setToDefaultPickupDelay();drop.addCommandTag("aiplayer_drop_"+a.getUuid());
+        c.getWorld().spawnEntity(drop);
+        for(int z=2;z<=4;z++)c.setBlockState(new BlockPos(5,2,z),Blocks.STONE);
+        a.gathering().start(ResourceGathering.Kind.STONE,3,false);
+        boolean[] finished={false};
+        c.runAtEveryTick(()->{
+            if(a.gathering().active()){
+                c.assertTrue(SurfaceStoneGathering.caveAccess(a,a.getBlockPos()),
+                    "Bench cleanup pulled an unfinished expedition outside the cave"+debug(a));
+                c.assertTrue(a.intelligence().activity()!=dev.aiplayer.ai.brain.DecisionPolicy.Activity.CRAFT,
+                    "A broken bench drop was treated as a ready crafting station"+debug(a));
+            } else if(a.gathering().progress()==3)finished[0]=true;
+        });
+        c.runAtTick(1000,()->{
+            c.assertTrue(finished[0],"Stone collection was cancelled to recover its broken bench"+debug(a));
+            c.assertTrue(owns(a,Items.STONE_PICKAXE) && owns(a,Items.STONE_AXE),
+                "Deferred bench recovery lost the real station or the upgrade ingredients"+debug(a)
+                    +" "+a.crafting().diagnostics());
+            c.complete();
+        });
+    }
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="surface",tickLimit=500)
     public void refusesOutdoorOrderEvenWithNearbyCoveredStone(TestContext c){
         CompanionEntity a=worker(c);a.equipStack(EquipmentSlot.MAINHAND,new ItemStack(Items.WOODEN_PICKAXE));c.setBlockState(new BlockPos(4,2,2),Blocks.STONE);
