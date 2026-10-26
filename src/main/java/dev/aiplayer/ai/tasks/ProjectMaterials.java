@@ -315,13 +315,13 @@ public final class ProjectMaterials {
     private boolean smelt(ServerWorld world,Item output,int depth){
         FurnaceBlockEntity oven=furnace(world,depth+1);
         if(oven==null)return false;
-        status="Ir até a fornalha do projeto";
-        if(!work.approach(furnace))return false;
         if(!world.getGameRules().getBoolean(GameRules.DO_MOB_GRIEFING)){
             status="As regras do mundo impedem usar a fornalha do projeto";return false;
         }
         ItemStack finished=oven.getStack(2);
         if(!finished.isEmpty()){
+            status="Ir até a fornalha para retirar o produto";
+            if(!work.approach(furnace))return false;
             ItemStack remainder=npc.backpack.addStack(finished.copy());
             int accepted=finished.getCount()-remainder.getCount();
             if(accepted>0){oven.removeStack(2,accepted);oven.markDirty();npc.backpack.markDirty();}
@@ -334,6 +334,8 @@ public final class ProjectMaterials {
             if(fuel.isEmpty() && burning<=0){
                 Item available=fuelAvailable(input.isOf(log));
                 if(available==null){if(!ensure(world,planks,1,depth+1))return false;available=planks;}
+                status="Levar combustível real até a fornalha";
+                if(!work.approach(furnace))return false;
                 if(consume(available,1)){oven.setStack(1,new ItemStack(available));oven.markDirty();}
             }
             status="Aguardar fundição real: "+label(input.getItem());npc.markWorking();return false;
@@ -346,6 +348,11 @@ public final class ProjectMaterials {
             if(output==Items.CHARCOAL){if(!ensure(world,planks,1,depth+1))return false;available=planks;}
             else {if(!ensure(world,Items.CHARCOAL,1,depth+1))return false;available=Items.CHARCOAL;}
         }
+        // Obtain raw material and fuel before owning a route to the oven.
+        // Re-approaching it on every gather tick kept the worker within reach
+        // of the furnace instead of letting it walk to distant ingredients.
+        status="Levar matéria-prima e combustível até a fornalha";
+        if(!work.approach(furnace))return false;
         // Reserve fuel before adding input, so a charcoal prerequisite cannot
         // become blocked behind an unfuelled iron/sand stack in this furnace.
         if(fuel.isEmpty() && burning<201 && available!=null && consume(available,1))oven.setStack(1,new ItemStack(available));

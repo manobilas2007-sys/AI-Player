@@ -18,6 +18,7 @@ import net.minecraft.test.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
 
 import java.util.UUID;
 
@@ -267,6 +268,62 @@ public final class ProjectMaterialsTests implements FabricGameTest {
             c.assertTrue(materials.count(Items.GLASS)==1,"Sand was not smelted into real glass: "+materials.status());
             c.assertTrue(materials.count(Items.SAND)==0 && materials.count(Items.CHARCOAL)==0,
                 "Glass production did not consume its sand and fuel");c.complete();
+        });
+    }
+
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=1200)
+    public void smeltingLeavesItsFurnaceToMineDistantSandAndReturnsWithRealInput(TestContext c){
+        CompanionEntity npc=worker(c);owner(npc);
+        npc.tasks().startAt(CompanionTasks.Kind.TEND_FARM,npc.getBlockPos(),null);
+        ProjectMaterials materials=materials(npc);BlockPos oven=furnace(c,npc,materials);
+        BlockPos sand=c.getAbsolutePos(new BlockPos(20,2,4));c.getWorld().setBlockState(sand,Blocks.SAND.getDefaultState());
+        npc.backpack.setStack(0,new ItemStack(Items.COAL));
+        boolean[] leftOven={false},sawRealDrop={false};
+        c.runAtEveryTick(()->{
+            if(npc.squaredDistanceTo(Vec3d.ofCenter(oven))>8*8)leftOven[0]=true;
+            if(!c.getWorld().getEntitiesByClass(ItemEntity.class,new Box(sand).expand(3),
+                    e->e.isAlive() && e.getStack().isOf(Items.SAND)
+                        && e.getCommandTags().contains("aiplayer_drop_"+npc.getUuid())).isEmpty())sawRealDrop[0]=true;
+            FurnaceBlockEntity furnace=(FurnaceBlockEntity)c.getWorld().getBlockEntity(oven);
+            int input=furnace.getStack(0).getCount(),fuel=furnace.getStack(1).getCount(),glass=materials.count(Items.GLASS);
+            materials.ensure(Items.GLASS,1);
+            if(furnace.getStack(0).getCount()>input || furnace.getStack(1).getCount()>fuel || materials.count(Items.GLASS)>glass)
+                c.assertTrue(npc.getEyePos().squaredDistanceTo(Vec3d.ofCenter(oven))<=3.5*3.5,
+                    "Furnace inventory was mutated while the worker was away gathering sand");
+        });
+        c.runAtTick(1080,()->{
+            c.assertTrue(leftOven[0] && sawRealDrop[0] && c.getWorld().getBlockState(sand).isAir(),
+                "Smelting kept the worker near its oven instead of physically mining distant sand: "+materials.diagnostics());
+            c.assertTrue(materials.count(Items.GLASS)==1 && materials.count(Items.SAND)==0 && materials.count(Items.COAL)==0,
+                "Distant sand/furnace chain did not conserve its real input and fuel: "+materials.status());c.complete();
+        });
+    }
+
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=1200)
+    public void occupiedUnfuelledFurnaceLetsWorkerFetchDistantWoodBeforeRefuelling(TestContext c){
+        CompanionEntity npc=worker(c);owner(npc);
+        npc.tasks().startAt(CompanionTasks.Kind.TEND_FARM,npc.getBlockPos(),null);
+        ProjectMaterials materials=materials(npc);BlockPos oven=furnace(c,npc,materials);
+        FurnaceBlockEntity furnace=(FurnaceBlockEntity)c.getWorld().getBlockEntity(oven);
+        furnace.setStack(0,new ItemStack(Items.RAW_IRON));furnace.markDirty();
+        BlockPos tree=c.getAbsolutePos(new BlockPos(20,2,4));
+        for(int y=0;y<3;y++)c.getWorld().setBlockState(tree.up(y),Blocks.OAK_LOG.getDefaultState());
+        for(int x=-1;x<=1;x++)for(int z=-1;z<=1;z++)c.getWorld().setBlockState(tree.add(x,3,z),Blocks.OAK_LEAVES.getDefaultState());
+        boolean[] leftOven={false};
+        c.runAtEveryTick(()->{
+            if(npc.squaredDistanceTo(Vec3d.ofCenter(oven))>8*8)leftOven[0]=true;
+            int fuel=furnace.getStack(1).getCount(),iron=materials.count(Items.IRON_INGOT);
+            materials.ensure(Items.IRON_INGOT,1);
+            if(furnace.getStack(1).getCount()>fuel || materials.count(Items.IRON_INGOT)>iron)
+                c.assertTrue(npc.getEyePos().squaredDistanceTo(Vec3d.ofCenter(oven))<=3.5*3.5,
+                    "Existing furnace input was fuelled or collected remotely");
+        });
+        c.runAtTick(1080,()->{
+            c.assertTrue(leftOven[0] && c.getWorld().getBlockState(tree).isAir(),
+                "Existing furnace input blocked the trip for real wood fuel: "+materials.diagnostics());
+            c.assertTrue(materials.count(Items.IRON_INGOT)==1 && materials.count(Items.OAK_PLANKS)==3
+                    && materials.count(Items.OAK_LOG)==0 && furnace.getStack(0).isEmpty() && furnace.getStack(2).isEmpty(),
+                "Wood fuel/iron chain did not consume exactly one real plank from its gathered log: "+materials.status());c.complete();
         });
     }
 
