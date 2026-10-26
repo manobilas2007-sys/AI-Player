@@ -8,6 +8,8 @@ A versão 0.6.1 corrige o início de projetos sem materiais: troncos acessíveis
 
 O retorno à obra permite ajustar a posição na beirada do piso já construído. Picaretas gastas não satisfazem a necessidade de uma ferramenta utilizável, e recuperar uma bancada já quebrada não interrompe uma expedição de pedra em andamento.
 
+Para fundir materiais, o NPC obtém primeiro a matéria-prima e o combustível, depois retorna à fornalha. Inserir ingredientes, alimentar a fornalha e retirar o produto continuam exigindo acesso físico à estação.
+
 ## Exemplos de diálogo
 
 - **“Construa uma casa”**: o NPC apresenta os modelos disponíveis. Nesta versão existe o abrigo de madeira detalhado. Após escolher, ele confirma o local e a madeira antes de começar.
