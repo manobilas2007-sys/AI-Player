@@ -21,6 +21,8 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.UUID;
+import java.util.HashSet;
+import java.util.Set;
 
 /** Dependency tests use actual inventories, block entities and vanilla furnace
  * ticks. The worker is unowned until a test explicitly enables physical pickup,
@@ -357,6 +359,48 @@ public final class ProjectMaterialsTests implements FabricGameTest {
         });
     }
 
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=1900)
+    public void bucketGathersThreeDistantOresBeforeLoadingOneRealFuelBatch(TestContext c){
+        CompanionEntity npc=worker(c);owner(npc);
+        npc.tasks().startAt(CompanionTasks.Kind.TEND_FARM,npc.getBlockPos(),null);
+        ProjectMaterials materials=materials(npc);BlockPos oven=furnace(c,npc,materials);
+        // The ore route returns from the east; keep the supplied real bench
+        // beside that oven work area so this test isolates ore batching.
+        c.setBlockState(new BlockPos(8,2,6),Blocks.CRAFTING_TABLE);
+        BlockPos[] ores={c.getAbsolutePos(new BlockPos(20,2,4)),c.getAbsolutePos(new BlockPos(20,2,7)),c.getAbsolutePos(new BlockPos(20,2,10))};
+        for(BlockPos ore:ores)c.getWorld().setBlockState(ore,Blocks.IRON_ORE.getDefaultState());
+        npc.backpack.setStack(0,new ItemStack(Items.STONE_PICKAXE));npc.backpack.setStack(1,new ItemStack(Items.COAL));
+        Set<UUID> drops=new HashSet<>();int[] firstLoad={-1},loads={0};boolean[] leftOven={false},madeBucket={false};
+        c.runAtEveryTick(()->{
+            if(npc.squaredDistanceTo(Vec3d.ofCenter(oven))>8*8)leftOven[0]=true;
+            FurnaceBlockEntity furnace=(FurnaceBlockEntity)c.getWorld().getBlockEntity(oven);
+            int input=furnace.getStack(0).getCount(),raw=materials.count(Items.RAW_IRON),fuel=furnace.getStack(1).getCount();
+            materials.ensure(Items.BUCKET,1);
+            for(ItemEntity drop:c.getWorld().getEntitiesByClass(ItemEntity.class,npc.getBoundingBox().expand(32),
+                    e->e.isAlive() && e.getStack().isOf(Items.RAW_IRON)
+                        && e.getCommandTags().contains("aiplayer_drop_"+npc.getUuid())))drops.add(drop.getUuid());
+            if(furnace.getStack(0).getCount()>input || furnace.getStack(1).getCount()>fuel){
+                c.assertTrue(npc.getEyePos().squaredDistanceTo(Vec3d.ofCenter(oven))<=3.5*3.5,"Ore batch was inserted remotely");
+                for(BlockPos ore:ores)c.assertTrue(c.getWorld().getBlockState(ore).isAir(),"Furnace was fuelled before the required ore expedition finished");
+            }
+            if(furnace.getStack(0).getCount()>input){
+                c.assertTrue(input==0 && raw==3 && furnace.getStack(0).getCount()==3,
+                    "Bucket lost its three-ore goal and repeatedly loaded one input at a time");
+                firstLoad[0]=npc.age;loads[0]++;
+            }
+            if(materials.count(Items.BUCKET)>0 && !madeBucket[0]){
+                c.assertTrue(firstLoad[0]>=0 && npc.age-firstLoad[0]>=600,"Three iron ingots bypassed their vanilla furnace cook time");
+                madeBucket[0]=true;
+            }
+        });
+        c.runAtTick(1770,()->{
+            c.assertTrue(leftOven[0] && drops.size()==3 && loads[0]==1,"Ore batching skipped physical mining, pickup or a single real furnace load: "+materials.diagnostics());
+            c.assertTrue(madeBucket[0] && materials.count(Items.BUCKET)==1 && materials.count(Items.RAW_IRON)==0
+                    && materials.count(Items.IRON_INGOT)==0 && materials.count(Items.COAL)==0,
+                "Three distant ores and one fuel did not become exactly one real bucket: "+materials.diagnostics());c.complete();
+        });
+    }
+
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=150)
     public void disabledCraftingPreservesIngredientsAndCreatesNoBucket(TestContext c){
         CompanionEntity npc=worker(c);ProjectMaterials materials=materials(npc);bench(c);npc.autoCraft=false;
@@ -438,6 +482,32 @@ public final class ProjectMaterialsTests implements FabricGameTest {
             c.assertTrue(materials.count(Items.OAK_PLANKS)==0 && materials.count(Items.STICK)==0,
                 "Replacement pick did not consume exactly three planks and two sticks");
             c.assertTrue(worn.getDamage()==worn.getMaxDamage()-1,"Project mined with its worn pick");c.complete();
+        });
+    }
+
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=1400)
+    public void nestedOreToolDependencyCanAbandonAnUnreachableWoodDrop(TestContext c){
+        CompanionEntity npc=worker(c);owner(npc);
+        npc.tasks().startAt(CompanionTasks.Kind.TEND_FARM,npc.getBlockPos(),null);
+        ProjectMaterials materials=materials(npc);bench(c);
+        npc.backpack.setStack(0,new ItemStack(Items.COBBLESTONE,3));
+        BlockPos ore=c.getAbsolutePos(new BlockPos(4,2,4));c.getWorld().setBlockState(ore,Blocks.IRON_ORE.getDefaultState());
+        BlockPos tree=c.getAbsolutePos(new BlockPos(7,2,4));
+        for(int y=0;y<3;y++)c.getWorld().setBlockState(tree.up(y),Blocks.OAK_LOG.getDefaultState());
+        for(int x=-1;x<=1;x++)for(int z=-1;z<=1;z++)c.getWorld().setBlockState(tree.add(x,3,z),Blocks.OAK_LEAVES.getDefaultState());
+        BlockPos sealed=c.getAbsolutePos(new BlockPos(12,3,12));
+        for(BlockPos pos:BlockPos.iterate(sealed.add(-1,-1,-1),sealed.add(1,1,1)))
+            c.getWorld().setBlockState(pos,pos.equals(sealed)?Blocks.AIR.getDefaultState():Blocks.STONE.getDefaultState());
+        ItemEntity unreachable=new ItemEntity(c.getWorld(),sealed.getX()+0.5,sealed.getY()+0.25,sealed.getZ()+0.5,new ItemStack(Items.OAK_LOG));
+        unreachable.setPickupDelay(0);unreachable.addCommandTag("aiplayer_drop_"+npc.getUuid());c.getWorld().spawnEntity(unreachable);
+        c.runAtEveryTick(()->materials.ensure(Items.RAW_IRON,1));
+        c.runAtTick(1280,()->{
+            c.assertTrue(materials.count(Items.RAW_IRON)==1 && c.getWorld().getBlockState(ore).isAir(),
+                "Parent ore search kept resetting its nested wood-drop timeout: "+materials.diagnostics());
+            c.assertTrue(unreachable.isAlive() && unreachable.getStack().isOf(Items.OAK_LOG),
+                "Nested dependency waited for the inaccessible drop to despawn or collected it remotely");
+            c.assertTrue(c.getWorld().getBlockState(tree).isAir() && materials.count(Items.STONE_PICKAXE)==1
+                    && materials.count(Items.COBBLESTONE)==0,"Pickaxe dependency skipped its alternate real timber or recipe costs");c.complete();
         });
     }
 }

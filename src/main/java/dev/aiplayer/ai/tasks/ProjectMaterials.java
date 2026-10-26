@@ -44,7 +44,7 @@ public final class ProjectMaterials {
     private final ProjectWork work;
     private final PhysicalMining mining;
     private Item log=Items.OAK_LOG,planks=Items.OAK_PLANKS;
-    private Item miningFor,scanFor,crafting;
+    private Item miningFor,scanFor,crafting,smelting,dropFor;
     private BlockPos target,scanOrigin,furnace,bench,preferredFurnace,preferredBench;
     private Box worksite;
     private int scanRadius,scanY,scanEdge,craftTicks,scans,searchAt,targetSince,nextRoute;
@@ -78,12 +78,17 @@ public final class ProjectMaterials {
     public BlockPos furnacePos(){return furnace;}
     public String status(){return status;}
     public String diagnostics(){
-        String targetState="none",drop="none";
+        String targetState="none",drop="none",ovenState="none";
         if(npc.getWorld() instanceof ServerWorld world){
             if(target!=null)targetState=world.isChunkLoaded(target)?world.getBlockState(target).toString():"unloaded";
             if(dropTarget!=null){
                 var entity=world.getEntity(dropTarget);
                 drop=entity instanceof ItemEntity item?item.getStack()+"@"+item.getPos():"missing:"+dropTarget;
+            }
+            if(furnace!=null && world.isChunkLoaded(furnace) && world.getBlockEntity(furnace) instanceof FurnaceBlockEntity oven){
+                NbtCompound state=oven.createNbt();
+                ovenState="input="+oven.getStack(0)+",fuel="+oven.getStack(1)+",output="+oven.getStack(2)
+                    +",burn="+state.getShort("BurnTime")+",cook="+state.getShort("CookTime")+"/"+state.getShort("CookTimeTotal");
             }
         }
         ItemStack held=npc.getMainHandStack();
@@ -98,8 +103,9 @@ public final class ProjectMaterials {
             +" mining="+mining.target()+"/"+mining.hasProgress()+" hand="+held+"("+held.getDamage()+"/"+held.getMaxDamage()+")"
             +" allowedHand="+allowedHand+" picks="+picks
             +" scan="+itemId(scanFor)+"@"+scanOrigin+":"+scanRadius+","+scanY+","+scanEdge
-            +" searchWait="+(searchAt-npc.age)+" drop="+drop+" dropAge="+(npc.age-dropProgressAt)
+            +" searchWait="+(searchAt-npc.age)+" drop="+drop+" dropFor="+itemId(dropFor)+" dropAge="+(npc.age-dropProgressAt)
             +" recipe="+itemId(crafting)+":"+craftTicks+" axePending="+axePending+" woodReceived="+woodReceived
+            +" smelt="+itemId(smelting)+" oven={"+ovenState+"}"
             +" bench="+bench+" preferredBench="+preferredBench+" furnace="+furnace+" preferredFurnace="+preferredFurnace;
     }
     private String itemId(Item item){return item==null?"none":Registries.ITEM.getId(item).toString();}
@@ -110,7 +116,7 @@ public final class ProjectMaterials {
     }
     public void pause(){mining.reset();npc.clearWorkingVisual();}
     public void cancel(){
-        pause();target=null;scanFor=null;miningFor=null;crafting=null;craftTicks=0;
+        pause();target=null;scanFor=null;miningFor=null;crafting=null;smelting=null;craftTicks=0;
         // Stations belong to the cancelled project, not to every future job.
         // Keeping an old preferred site can route the next build back to a
         // distant farm instead of creating its own nearby workbench/furnace.
@@ -118,7 +124,7 @@ public final class ProjectMaterials {
         worksite=null;dimension="";scanOrigin=null;
         scanRadius=0;scanY=0;scanEdge=0;scans=0;searchAt=0;targetSince=0;nextRoute=0;
         bestTargetDistance=Double.MAX_VALUE;dropProgressAt=0;
-        dropTarget=null;bestDropDistance=Double.MAX_VALUE;avoidedDrops.clear();lastEnsure=-1;
+        dropTarget=null;dropFor=null;bestDropDistance=Double.MAX_VALUE;avoidedDrops.clear();lastEnsure=-1;
         woodHarvests=0;preparingAxe=false;axePending=false;woodReceived=false;
         status="Conferir materiais do projeto";
     }
@@ -161,7 +167,7 @@ public final class ProjectMaterials {
     private boolean ensure(ServerWorld world,Item item,int amount,int depth){
         if(count(item)>=amount)return true;
         if(depth>14){status="Não consegui resolver os materiais de "+label(item);return false;}
-        if(item==Items.IRON_INGOT || item==Items.GLASS || item==Items.CHARCOAL)return smelt(world,item,depth+1);
+        if(item==Items.IRON_INGOT || item==Items.GLASS || item==Items.CHARCOAL)return smelt(world,item,amount,depth+1);
         Recipe recipe=recipe(item);
         if(recipe!=null){
             for(var ingredient:recipe.ingredients().entrySet())
@@ -312,7 +318,8 @@ public final class ProjectMaterials {
         if(work.place(spot,Blocks.FURNACE.getDefaultState(),Items.FURNACE,1))furnace=spot.toImmutable();
         return null;
     }
-    private boolean smelt(ServerWorld world,Item output,int depth){
+    private boolean smelt(ServerWorld world,Item output,int amount,int depth){
+        smelting=output;
         FurnaceBlockEntity oven=furnace(world,depth+1);
         if(oven==null)return false;
         if(!world.getGameRules().getBoolean(GameRules.DO_MOB_GRIEFING)){
@@ -342,7 +349,12 @@ public final class ProjectMaterials {
         }
         Item raw=output==Items.IRON_INGOT?Items.RAW_IRON:output==Items.GLASS
             ?(count(Items.RED_SAND)>0?Items.RED_SAND:Items.SAND):log;
-        if(!ensure(world,raw,1,depth+1))return false;
+        // Gather the known demand in one trip and let vanilla smelt the real
+        // input stack. Fetching one ore after each ingot wasted the current
+        // fuel's burn time while the worker travelled to the quarry again.
+        int batch=Math.min(raw.getMaxCount(),Math.max(1,amount-count(output)));
+        if(raw==Items.RED_SAND)batch=Math.min(batch,count(raw));
+        if(!ensure(world,raw,batch,depth+1))return false;
         Item available=fuelAvailable(output==Items.CHARCOAL);
         if(fuel.isEmpty() && burning<201 && available==null){
             if(output==Items.CHARCOAL){if(!ensure(world,planks,1,depth+1))return false;available=planks;}
@@ -356,7 +368,7 @@ public final class ProjectMaterials {
         // Reserve fuel before adding input, so a charcoal prerequisite cannot
         // become blocked behind an unfuelled iron/sand stack in this furnace.
         if(fuel.isEmpty() && burning<201 && available!=null && consume(available,1))oven.setStack(1,new ItemStack(available));
-        if(consume(raw,1)){oven.setStack(0,new ItemStack(raw));oven.markDirty();npc.animateInteraction(CompanionEntity.CRAFT,6);}
+        if(consume(raw,batch)){oven.setStack(0,new ItemStack(raw,batch));oven.markDirty();npc.animateInteraction(CompanionEntity.CRAFT,6);}
         status="Fundir "+label(raw)+" na fornalha";return false;
     }
     private Item fuelAvailable(boolean charcoal){
@@ -429,21 +441,24 @@ public final class ProjectMaterials {
         if(!drops.isEmpty()){
             ItemEntity nearest=drops.stream().min(Comparator.comparingDouble(npc::squaredDistanceTo)).orElseThrow();
             double distance=npc.squaredDistanceTo(nearest);
-            if(!nearest.getUuid().equals(dropTarget)){
-                dropTarget=nearest.getUuid();bestDropDistance=distance;dropProgressAt=npc.age;
+            if(!nearest.getUuid().equals(dropTarget) || dropFor!=item){
+                dropTarget=nearest.getUuid();dropFor=item;bestDropDistance=distance;dropProgressAt=npc.age;
             }else if(distance<bestDropDistance-0.1){bestDropDistance=distance;dropProgressAt=npc.age;}
             // A visible drop behind an impassable wall is not a permanent
             // dependency. Retry later while still looking for real material.
             if(npc.age-dropProgressAt>160){
                 if(avoidedDrops.size()>=64)avoidedDrops.clear();
-                avoidedDrops.put(nearest.getUuid(),npc.age+200);dropTarget=null;
+                avoidedDrops.put(nearest.getUuid(),npc.age+200);dropTarget=null;dropFor=null;
                 npc.getNavigation().stop();status="Procurar outro material com acesso seguro";return false;
             }
             status="Recolher fisicamente "+label(item);
             if(!npc.survival().canCollect(nearest) && npc.age>=nextRoute){nextRoute=npc.age+10;WorkNavigation.moveToDrop(npc,nearest,1.0);}
             return false;
         }
-        dropTarget=null;
+        // A parent ore request can need a pickaxe, whose missing sticks need
+        // wood. Its empty ore-drop scan must not reset the nested wood drop's
+        // progress timer on every tick and make an unreachable drop immortal.
+        if(dropFor==item){dropTarget=null;dropFor=null;}
         if(!world.getGameRules().getBoolean(GameRules.DO_MOB_GRIEFING)
                 || !world.getGameRules().getBoolean(GameRules.DO_TILE_DROPS)){
             status="As regras do mundo impedem minerar materiais com drops reais";return false;

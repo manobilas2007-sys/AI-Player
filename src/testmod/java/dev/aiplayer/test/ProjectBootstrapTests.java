@@ -13,6 +13,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.LeavesBlock;
 import net.minecraft.block.enums.DoubleBlockHalf;
+import net.minecraft.block.entity.FurnaceBlockEntity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Item;
 import net.minecraft.item.AxeItem;
@@ -97,12 +98,35 @@ public final class ProjectBootstrapTests implements FabricGameTest {
             +" hand="+npc.getMainHandStack()+" bag="+java.util.stream.IntStream.range(0,npc.backpack.size())
                 .mapToObj(i->npc.backpack.getStack(i).toString()).toList();
     }
+    /** Bounded breadcrumbs keep a final dependency snapshot from concealing
+     * repeated travel/fuel cycles earlier in a long empty-inventory order. */
+    private void trace(TestContext c,String label,CompanionEntity npc){
+        long[] last={-1000};String[] previous={""};int[] samples={0};
+        c.runAtEveryTick(()->{
+            if(!npc.tasks().active() || samples[0]>=160 || c.getTick()-last[0]<100)return;
+            String status=npc.tasks().status();
+            if(status.equals(previous[0]) && c.getTick()-last[0]<500)return;
+            last[0]=c.getTick();previous[0]=status;samples[0]++;
+            NbtCompound saved=new NbtCompound();npc.tasks().writeNbt(saved);
+            NbtCompound materials=saved.getCompound("ProjectMaterials");String oven="none";
+            if(materials.contains("Furnace")){
+                BlockPos pos=BlockPos.fromLong(materials.getLong("Furnace"));
+                if(c.getWorld().isChunkLoaded(pos) && c.getWorld().getBlockEntity(pos) instanceof FurnaceBlockEntity furnace){
+                    NbtCompound state=furnace.createNbt();
+                    oven=pos+" input="+furnace.getStack(0)+" fuel="+furnace.getStack(1)+" output="+furnace.getStack(2)
+                        +" burn="+state.getShort("BurnTime")+" cook="+state.getShort("CookTime")+"/"+state.getShort("CookTimeTotal");
+                }
+            }
+            System.out.println("AI_PLAYER_BOOTSTRAP "+label+" tick="+c.getTick()+" age="+npc.age+" oven="+oven+" "+diagnostics(npc));
+        });
+    }
 
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="bootstrap_house",tickLimit=18000)
     public void confirmedShelterObtainsAndProcessesAllMaterialsFromAnEmptyInventory(TestContext c){
         Worker worker=world(c);CompanionEntity npc=worker.npc();
         BlockPos anchor=c.getAbsolutePos(ORDER.add(2,0,0));
         confirm(c,worker,"construa um abrigo de carvalho",CompanionTasks.Kind.BUILD_HOUSE);
+        trace(c,"house",npc);
         boolean[] usedRealAxe={false};
         c.runAtTick(900,()->c.assertTrue(logs(c)<INITIAL_LOGS,
             "Confirmed empty-inventory shelter never started acquiring natural timber: "+diagnostics(npc)));
@@ -140,6 +164,7 @@ public final class ProjectBootstrapTests implements FabricGameTest {
         // as in the reported failure. Confirmation must give the project control.
         npc.gathering().start(ResourceGathering.Kind.FOOD,3,false);
         confirm(c,worker,"crie uma plantação",CompanionTasks.Kind.CREATE_FARM);
+        trace(c,"farm",npc);
         boolean[] usedRealAxe={false};
         c.runAtTick(900,()->c.assertTrue(logs(c)<INITIAL_LOGS,
             "Confirmed empty-inventory farm never started acquiring natural timber: "+diagnostics(npc)));
