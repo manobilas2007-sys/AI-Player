@@ -117,7 +117,8 @@ public final class ProjectBootstrapTests implements FabricGameTest {
                         +" burn="+state.getShort("BurnTime")+" cook="+state.getShort("CookTime")+"/"+state.getShort("CookTimeTotal");
                 }
             }
-            System.out.println("AI_PLAYER_BOOTSTRAP "+label+" tick="+c.getTick()+" age="+npc.age+" oven="+oven+" "+diagnostics(npc));
+            System.out.println("AI_PLAYER_BOOTSTRAP "+label+" tick="+c.getTick()+" age="+npc.age
+                +" naturalSand="+resource(c,30,Blocks.SAND)+" oven="+oven+" "+diagnostics(npc));
         });
     }
 

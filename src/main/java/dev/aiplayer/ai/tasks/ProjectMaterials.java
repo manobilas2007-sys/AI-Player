@@ -49,6 +49,7 @@ public final class ProjectMaterials {
     private Box worksite;
     private int scanRadius,scanY,scanEdge,craftTicks,scans,searchAt,targetSince,nextRoute;
     private int lastEnsure=-1;
+    private int lastTargetTick=-1;
     private int woodHarvests;
     private boolean preparingAxe,axePending,woodReceived;
     private double bestTargetDistance=Double.MAX_VALUE;
@@ -123,6 +124,7 @@ public final class ProjectMaterials {
         furnace=null;bench=null;preferredFurnace=null;preferredBench=null;
         worksite=null;dimension="";scanOrigin=null;
         scanRadius=0;scanY=0;scanEdge=0;scans=0;searchAt=0;targetSince=0;nextRoute=0;
+        lastTargetTick=-1;
         bestTargetDistance=Double.MAX_VALUE;dropProgressAt=0;
         dropTarget=null;dropFor=null;bestDropDistance=Double.MAX_VALUE;avoidedDrops.clear();lastEnsure=-1;
         woodHarvests=0;preparingAxe=false;axePending=false;woodReceived=false;
@@ -402,7 +404,7 @@ public final class ProjectMaterials {
             :item==Items.RAW_IRON?(state.isOf(Blocks.IRON_ORE)||state.isOf(Blocks.DEEPSLATE_IRON_ORE))
             :item==Items.DIRT?(state.isOf(Blocks.DIRT)||state.isOf(Blocks.GRASS_BLOCK)):false;
     }
-    private boolean safeTarget(ServerWorld world,BlockPos pos,Item item){
+    private boolean safeTarget(ServerWorld world,BlockPos pos,Item item,boolean requireObservation){
         if(worksite!=null && worksite.contains(Vec3d.ofCenter(pos)))return false;
         if(!world.isChunkLoaded(pos) || !matches(world.getBlockState(pos),item) || world.getBlockEntity(pos)!=null
                 || !world.getFluidState(pos).isEmpty() || OwnedBlocks.get(world).protectedBlock(pos)
@@ -418,7 +420,7 @@ public final class ProjectMaterials {
         // The actual ray below decides exposure. Grass and thin snow can
         // surround every trunk side without obscuring its reachable surface.
         if(item==log && !hasLeaves(world,pos))return false;
-        return visibleLoaded(world,pos);
+        return !requireObservation || visibleLoaded(world,pos);
     }
     private boolean hasLeaves(ServerWorld world,BlockPos pos){
         for(BlockPos leaf:BlockPos.iterate(pos.add(-3,0,-3),pos.add(3,6,3)))
@@ -481,10 +483,17 @@ public final class ProjectMaterials {
             // prerequisite. Require an additional actual pick before mining.
             if(!ensure(world,replacement,count(replacement)+1,depth+1))return false;
         }
-        if(target!=null && (miningFor!=item || !safeTarget(world,target,item))){target=null;mining.reset();}
+        // A source already observed outside the house remains known after a
+        // new wall obscures it. Physical approach/mining still require sight.
+        if(target!=null && (miningFor!=item || !safeTarget(world,target,item,false))){target=null;mining.reset();}
         if(target!=null){
             status="Obter "+label(item)+" em bloco natural acessível";
             double distance=npc.squaredDistanceTo(Vec3d.ofCenter(target));
+            // Smelting, crafting, menus and other dependencies may suspend a
+            // known source for hundreds of ticks. Its timeout counts active
+            // attempts, rather than expiring before the resumed walk begins.
+            if(npc.age-lastTargetTick>1){targetSince=npc.age;bestTargetDistance=distance;}
+            lastTargetTick=npc.age;
             if(distance<bestTargetDistance-0.2){bestTargetDistance=distance;targetSince=npc.age;}
             if(npc.age-targetSince>220){npc.intelligence().memory().failed(target,world.getTime());target=null;mining.reset();return false;}
             if(!work.approach(target))return false;
@@ -515,8 +524,9 @@ public final class ProjectMaterials {
             int dy=scanY==0?0:(scanY%2==1?-(scanY+1)/2:scanY/2);
             BlockPos candidate=scanOrigin.add(dx,dy,dz);
             if(++scanEdge>=Math.max(1,8*scanRadius)){scanEdge=0;if(++scanY>=25){scanY=0;scanRadius++;}}
-            if(safeTarget(world,candidate,item)){
+            if(safeTarget(world,candidate,item,true)){
                 target=candidate.toImmutable();miningFor=item;targetSince=npc.age;bestTargetDistance=Double.MAX_VALUE;
+                lastTargetTick=npc.age;
                 npc.intelligence().memory().remember(item==Items.RAW_IRON?"iron":item==Items.COAL?"coal":item==log?"wood":"material",target,world.getTime(),24000);
                 status="Encontrei "+label(item)+"; ir buscar";return false;
             }

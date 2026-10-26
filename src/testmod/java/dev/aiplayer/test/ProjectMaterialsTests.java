@@ -510,4 +510,36 @@ public final class ProjectMaterialsTests implements FabricGameTest {
                     && materials.count(Items.COBBLESTONE)==0,"Pickaxe dependency skipped its alternate real timber or recipe costs");c.complete();
         });
     }
+
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="project_materials",tickLimit=1000)
+    public void observedMaterialSurvivesALongPauseAndTemporaryOcclusion(TestContext c){
+        CompanionEntity npc=worker(c);owner(npc);
+        npc.tasks().startAt(CompanionTasks.Kind.TEND_FARM,npc.getBlockPos(),null);
+        ProjectMaterials materials=materials(npc);
+        BlockPos sand=c.getAbsolutePos(new BlockPos(20,2,4));c.getWorld().setBlockState(sand,Blocks.SAND.getDefaultState());
+        double startX=npc.getX();int[] pausedAt={-1},resumedAt={-1};boolean[] realDrop={false};
+        c.runAtEveryTick(()->{
+            materials.ensure(Items.SAND,1);
+            if(!c.getWorld().getEntitiesByClass(ItemEntity.class,new Box(sand).expand(3),
+                    e->e.isAlive() && e.getStack().isOf(Items.SAND)
+                        && e.getCommandTags().contains("aiplayer_drop_"+npc.getUuid())).isEmpty())realDrop[0]=true;
+            if(pausedAt[0]<0 && npc.getX()>startX+2 && c.getWorld().getBlockState(sand).isOf(Blocks.SAND)){
+                // Walking towards the only sand proves it was observed first.
+                // A real menu pause suspends work while another obstruction
+                // appears; a safe ground route remains around the wall.
+                npc.opened();pausedAt[0]=npc.age;
+                for(int z=0;z<=8;z++)for(int y=2;y<=5;y++)c.setBlockState(new BlockPos(12,y,z),Blocks.STONE);
+            }
+            if(pausedAt[0]>=0 && resumedAt[0]<0 && npc.age-pausedAt[0]>=300){npc.closed();resumedAt[0]=npc.age;}
+            if(resumedAt[0]>=0 && npc.age-resumedAt[0]>=250){
+                c.assertTrue(materials.count(Items.SAND)==1 && c.getWorld().getBlockState(sand).isAir() && realDrop[0],
+                    "Observed source was forgotten or timed out during its paused dependency: "+materials.diagnostics());
+                c.complete();
+            }
+        });
+        c.runAtTick(950,()->{
+            c.assertTrue(resumedAt[0]>=0,"Fixture never suspended and resumed the actual resource route");
+            c.assertTrue(materials.count(Items.SAND)==1,"Paused source did not finish physical collection: "+materials.diagnostics());c.complete();
+        });
+    }
 }
