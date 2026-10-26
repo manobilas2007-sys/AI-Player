@@ -10,6 +10,8 @@ O retorno à obra permite ajustar a posição na beirada do piso já construído
 
 Para fundir materiais, o NPC obtém primeiro a matéria-prima e o combustível, depois retorna à fornalha. Inserir ingredientes, alimentar a fornalha e retirar o produto continuam exigindo acesso físico à estação.
 
+O ferro necessário ao balde é reunido para uma carga da fornalha. As tentativas de recolher um drop são acompanhadas por material, permitindo desistir de um item inacessível mesmo quando ele faz parte de uma receita com várias dependências.
+
 ## Exemplos de diálogo
 
 - **“Construa uma casa”**: o NPC apresenta os modelos disponíveis. Nesta versão existe o abrigo de madeira detalhado. Após escolher, ele confirma o local e a madeira antes de começar.
