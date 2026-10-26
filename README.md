@@ -12,6 +12,8 @@ Para fundir materiais, o NPC obtém primeiro a matéria-prima e o combustível, 
 
 O ferro necessário ao balde é reunido para uma carga da fornalha. As tentativas de recolher um drop são acompanhadas por material, permitindo desistir de um item inacessível mesmo quando ele faz parte de uma receita com várias dependências.
 
+Um bloco já observado continua sendo um destino conhecido ao retomar a coleta. O tempo sem progresso conta apenas as tentativas ativas, sem incluir pausas para fabricar, fundir ou abrir o inventário.
+
 ## Exemplos de diálogo
 
 - **“Construa uma casa”**: o NPC apresenta os modelos disponíveis. Nesta versão existe o abrigo de madeira detalhado. Após escolher, ele confirma o local e a madeira antes de começar.
