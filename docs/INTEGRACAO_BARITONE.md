@@ -1,4 +1,4 @@
-# AI Player 0.6.2-dev: Baritone, diálogos e projetos físicos
+# AI Player 0.6.3-dev: Baritone, diálogos e projetos físicos
 
 ## Arquitetura
 
@@ -104,8 +104,11 @@ usam uma bancada acessível. Ferro, vidro e carvão vegetal são processados por
 uma fornalha vanilla colocada no mundo; combustível e tempo de cozimento são
 reais. Mineração produz drops no bloco e exige aproximação para recolher.
 
-A busca usa recursos expostos e visíveis, com rotas locais segmentadas. O NPC carrega a região ao redor enquanto caminha e amplia a procura quando não encontra o material perto; não carrega um destino distante inteiro de uma vez. O executor procura madeira da espécie escolhida, pedra, areia,
-carvão e ferro; não realiza escavação ilimitada até minério oculto. Quando um
+A busca observa recursos e entradas de cavernas e pode abrir escadas e galerias para expor pedra, carvão e ferro ocultos. `MaterialExcavation` integra esse acesso às dependências dos projetos e às ordens diretas de pedra. `SafeExcavation` preserva pisos e altura de passagem, usa ferramentas reais e revalida líquidos, construções e atores a cada passo. As entradas abertas na superfície ficam registradas em `SurfaceRestoration`; depois de sair, o NPC coloca terra real apenas nessa camada, preservando o túnel. Cancelamento e NBT mantêm essa obrigação, e os chunks permanecem ativos durante o retorno.
+
+`PreparedRoute` usa o A* incorporado para comparar caminhada, corte de terreno natural e colocação de apoios. O executor confirma alcance, material, durabilidade, colisão e estado atual antes de modificar cada bloco; busca terra próxima quando faltam apoios. A busca usa segmentos locais com orçamento de nós e continua conforme os chunks do NPC avançam. Isso não promete a rota global ótima em terreno desconhecido nem revela minérios através de blocos. Escavações sem recurso ou com perigo mudam a busca para outro trecho, sem perfurar um poço vertical.
+
+Quando um
 recurso ou rota não está acessível, mantém a necessidade no status. Não cria
 sementes, materiais, água ou ferramentas para completar uma tarefa.
 

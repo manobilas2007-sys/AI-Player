@@ -44,7 +44,7 @@ public final class ManualResourceSurvey {
         return world.raycast(new RaycastContext(start,end,RaycastContext.ShapeType.COLLIDER,
             RaycastContext.FluidHandling.NONE,npc)).getType()==HitResult.Type.MISS;
     }
-    private BlockPos cave(ServerWorld world){
+    public BlockPos observedCave(ServerWorld world){
         if(scanCenter==null || scanCenter.getSquaredDistance(npc.getBlockPos())>8*8){scanCenter=npc.getBlockPos();scan=0;}
         // Nearby visible standing cells, with a fixed per-tick observation budget.
         for(int budget=0;budget<96 && scan<CAVE_COLUMNS.size()*13;budget++,scan++){
@@ -62,7 +62,7 @@ public final class ManualResourceSurvey {
         if(!(npc.getWorld() instanceof ServerWorld world))return false;
         active=true;paused=false;
         if(seekCave && !caveTarget){
-            BlockPos entrance=cave(world);
+            BlockPos entrance=observedCave(world);
             if(entrance!=null){work.pause();waypoint=entrance;caveTarget=true;last=null;}
         }
         if(waypoint!=null){

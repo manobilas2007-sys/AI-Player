@@ -25,7 +25,8 @@
       "dev.aiplayer.test.CompanionChunkLoadingTests",
       "dev.aiplayer.test.LongRangeResourceTests",
       "dev.aiplayer.test.HouseNaturalTerrainTests",
-      "dev.aiplayer.test.ManualResourceSurveyTests"
+      "dev.aiplayer.test.ManualResourceSurveyTests",
+      "dev.aiplayer.test.ResourceAccessTests"
     ]
   },
   "depends": {

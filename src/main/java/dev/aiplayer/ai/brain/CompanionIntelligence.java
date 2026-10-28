@@ -20,6 +20,9 @@ public final class CompanionIntelligence {
     private final BrainMemory memory=new BrainMemory();
     private final NavigationMonitor navigation;
     private final TerrainRecovery recovery;
+    private final SurfaceRestoration restoration;
+    private int recoveryTick=-1;
+    private boolean recoveryResult;
     private final AutonomousSurvey survey;
     private DecisionPolicy.Activity activity=IDLE;
     private ResourcePlan plan=new ResourcePlan(0,0,false,4,false);
@@ -34,8 +37,14 @@ public final class CompanionIntelligence {
     private final Map<UUID,Integer> unreachableEnemies=new HashMap<>();
     private boolean following, craftAvailable;
     private long lastHurt, nextEmergencyFoodAt,nextMaterialAt;
-    public CompanionIntelligence(CompanionEntity npc){this.npc=npc;navigation=new NavigationMonitor(npc);recovery=new TerrainRecovery(npc);survey=new AutonomousSurvey(npc);}
+    public CompanionIntelligence(CompanionEntity npc){this.npc=npc;navigation=new NavigationMonitor(npc);recovery=new TerrainRecovery(npc);restoration=new SurfaceRestoration(npc);survey=new AutonomousSurvey(npc);}
     public BrainMemory memory(){return memory;}
+    public boolean recoverForWork(){
+        if(recoveryTick==npc.age)return recoveryResult;
+        recoveryTick=npc.age;
+        return recoveryResult=!npc.menuOpen() && !npc.isEating() && npc.getTarget()==null && recovery.tick();
+    }
+    public SurfaceRestoration restoration(){return restoration;}
     public DecisionPolicy.Activity activity(){return activity;}
     public ResourcePlan plan(){return plan;}
     public String status(){return (npc.tasks().active()?npc.tasks().status()+" | ":"")+activity+": "+memory.reason()+" | "+memory.objective()+" / "+memory.step()+" | faltam: "+plan.missingLogs()+" troncos, "+plan.missingFood()+" alimentos, "+ResourcePlan.stoneNeeded(npc)+" pedregulhos para melhorias";}
@@ -81,6 +90,13 @@ public final class CompanionIntelligence {
         if(npc.age>=nextPlan){plan=ResourcePlan.inspect(npc);craftAvailable=npc.autoCraft && npc.crafting().canBegin();nextPlan=npc.age+10;}
         LivingEntity target=npc.getTarget();
         boolean danger=enemy(target);
+        if(!danger && !npc.menuOpen() && !npc.isEating() && !npc.isInLava() && !npc.isOnFire()
+                && !(npc.isSubmergedInWater() && npc.getAir()<100)
+                && !(npc.autoSurvive && npc.getHealth()<=npc.getMaxHealth()*0.8f && npc.survival().hasFood())
+                && restoration.pending()){
+            activity=CLEANUP;memory.plan("Retornar do subsolo","Fechar somente a superfície com terra");
+            restoration.tick();return;
+        }
         double distance=owner==null?0:npc.squaredDistanceTo(owner);
         if(distance>225)following=true;
         else if(distance<64)following=false;
@@ -354,12 +370,13 @@ public final class CompanionIntelligence {
         if(pos!=null && pos.squaredDistanceTo(owner.getPos())<225)startSafe(BlockPos.ofFloored(pos),0.95);
     }
     public void write(NbtCompound root){
-        memory.write(root);recovery.write(root);root.putLong("NextEmergencyFood",nextEmergencyFoodAt);
+        memory.write(root);recovery.write(root);restoration.write(root);root.putLong("NextEmergencyFood",nextEmergencyFoodAt);
         root.putLong("NextMaterialAttempt",nextMaterialAt);
         if(materialJob!=null)root.put("MaterialGatherJob",materialJob.copy());
         if(suspendedJob!=null)root.put("SuspendedGatherJob",suspendedJob.copy());
     }
     public void read(NbtCompound root){
+        restoration.read(root);recoveryTick=-1;recoveryResult=false;
         recovery.read(!root.contains("WorkDimension") || root.getString("WorkDimension").equals(npc.getWorld().getRegistryKey().getValue().toString())?root:new NbtCompound());
         memory.read(root);nextEmergencyFoodAt=root.getLong("NextEmergencyFood");activity=IDLE;lastTick=-1;nextPlan=0;navigation.reset();
         nextMaterialAt=root.getLong("NextMaterialAttempt");

@@ -2,7 +2,7 @@ plugins {
     id 'fabric-loom' version '1.6.12'
     id 'maven-publish'
 }
-version = '0.6.2-dev'
+version = '0.6.3-dev'
 group = 'dev.aiplayer'
 base { archivesName = 'ai-player' }
 repositories { mavenCentral() }

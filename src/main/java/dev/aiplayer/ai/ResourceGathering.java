@@ -49,6 +49,8 @@ public final class ResourceGathering {
     private final SurfaceStoneGathering stone;
     private final TemporaryPillar pillar;
     private final ManualResourceSurvey manualSurvey;
+    private final dev.aiplayer.ai.tasks.MaterialExcavation manualAccess;
+    private int caveSearchTicks;
     private final java.util.List<BlockPos> treeLogs = new java.util.ArrayList<>();
     private boolean cleaning;
     private int recoveryLootUntil;
@@ -59,12 +61,12 @@ public final class ResourceGathering {
     private final java.util.List<DeferredTree> deferredTrees=new java.util.ArrayList<>();
     private final java.util.Map<BlockPos,Integer> avoidedTrees = new java.util.HashMap<>();
 
-    public ResourceGathering(CompanionEntity npc) {this.npc=npc;mining=new PhysicalMining(npc);stone=new SurfaceStoneGathering(npc);pillar=new TemporaryPillar(npc);manualSurvey=new ManualResourceSurvey(npc);}
+    public ResourceGathering(CompanionEntity npc) {this.npc=npc;mining=new PhysicalMining(npc);stone=new SurfaceStoneGathering(npc);pillar=new TemporaryPillar(npc);manualSurvey=new ManualResourceSurvey(npc);manualAccess=new dev.aiplayer.ai.tasks.MaterialExcavation(npc,new dev.aiplayer.ai.tasks.ProjectWork(npc),new PhysicalMining(npc,SurfaceStoneGathering::suitablePick),p->true);}
     public boolean isManual(){return active() && manual;}
     public boolean canStartAutomatic(){return npc.age>=idleCooldown && npc.age>=nextAutoCheck;}
     public void pause(){
         if(pausedAt<0)pausedAt=npc.age;
-        mining.reset();stone.pause();manualSurvey.pause();npc.clearWorkingVisual();
+        mining.reset();stone.pause();manualSurvey.pause();manualAccess.pause();npc.clearWorkingVisual();
     }
     public void resume(){
         stone.resume();
@@ -152,7 +154,7 @@ public final class ResourceGathering {
             && !(pillar.active() && pillar.cleanupReady()) && !(cleaning && pillar.cleanupReady());
     }
     /** Lock a planned excavation against opportunistic follow/craft arbitration. */
-    public boolean miningStone(){return kind==Kind.STONE && (stone.committed() || stone.inExcavation());}
+    public boolean miningStone(){return kind==Kind.STONE && (stone.committed() || stone.inExcavation() || manualAccess.active());}
     public boolean breakingBlock(){return mining.hasProgress() || (kind==Kind.STONE && stone.committed());}
     public boolean onConstructedSupport(){return pillar.isJumping() || (pillar.active() && pillar.owns(npc.getBlockPos().down()));}
     public boolean isNaturalTreeLog(BlockPos pos){
@@ -177,7 +179,7 @@ public final class ResourceGathering {
         if (task==Kind.NONE) {cancel(); return;}
         if(fromPlayer)npc.intelligence().clearSuspended();
         pausedAt=-1;mining.reset();stone.reset();treeLogs.clear();cleaning=pillar.active();lootTarget=null;nextRoute=0;
-        manualSurvey.reset();
+        manualAccess.cancel();caveSearchTicks=0;manualSurvey.reset();
         searching=false;kind=task; desired=Math.max(1,Math.min(264,count)); gathered=0;
         manual=fromPlayer; if(!fromPlayer)lastAutoKind=task; origin=npc.getBlockPos().toImmutable(); tree=null; animal=null;waypoint=null;waypointIndex=0;
         lastAction=npc.age; nextSearch=0; nextPreyScan=0; noProgressTicks=0;attackCooldown=0;
@@ -194,7 +196,7 @@ public final class ResourceGathering {
         // the next order. Cutting its lower trunk may leave upper logs floating.
         if(kind==Kind.WOOD && tree!=null && !treeLogs.isEmpty())deferTree(180);
         if(done)tell("Pronto, meu rei! Consegui "+gathered+"/"+desired+(kind==Kind.WOOD?" troncos.":kind==Kind.STONE?" pedregulhos.":" alimentos."));
-        manualSurvey.reset();stone.reset();kind=Kind.NONE;tree=null;treeLogs.clear();animal=null;waypoint=null;mining.reset();cleaning=pillar.active();npc.getNavigation().stop();
+        manualAccess.cancel();caveSearchTicks=0;manualSurvey.reset();stone.reset();kind=Kind.NONE;tree=null;treeLogs.clear();animal=null;waypoint=null;mining.reset();cleaning=pillar.active();npc.getNavigation().stop();
         if(done)npc.intelligence().memory().succeeded("Coleta verificada: "+gathered+"/"+desired);
         idleCooldown=npc.age+(done?60:160);
     }
@@ -234,6 +236,7 @@ public final class ResourceGathering {
         // An active staircase/gallery owns its excavation route. Do not let
         // opportunistic drop navigation reset the step timer every few ticks.
         // Natural pickup still runs in SurvivalController as the NPC walks.
+        if(kind==Kind.STONE && manualAccess.active()){stoneTick();return true;}
         if(kind==Kind.STONE && (stone.committed() || stone.inExcavation())){stoneTick();return true;}
         if(!pillar.active() && seekDrops())return true;
         if(kind==Kind.STONE){stoneTick();return true;}
@@ -245,7 +248,21 @@ public final class ResourceGathering {
     }
     private void stoneTick(){
         if(!npc.autoLoot){tell("Ative a coleta de drops pra eu recolher os pedregulhos, meu rei.");finish(false);return;}
-        if(manual && !SurfaceStoneGathering.caveAccess(npc,npc.getBlockPos())){manualSurvey.tick(true);return;}
+        if(manual && manualAccess.active()){
+            if(!manualAccess.digging() && SurfaceStoneGathering.caveAccess(npc,npc.getBlockPos())){
+                manualAccess.cancel();manualSurvey.stop();lastAction=npc.age;
+            }else{
+                if(!SurfaceStoneGathering.hasPick(npc)){manualAccess.pause();lastAction=npc.age;return;}
+                manualAccess.tick();if(!manualAccess.active())caveSearchTicks=0;lastAction=npc.age;return;
+            }
+        }
+        if(manual && !SurfaceStoneGathering.caveAccess(npc,npc.getBlockPos())){
+            if(++caveSearchTicks>180 && SurfaceStoneGathering.hasPick(npc)){
+                manualSurvey.stop();manualAccess.begin(Items.COBBLESTONE,npc.backpack.count(Items.COBBLESTONE)+desired-gathered);
+                manualAccess.tick();lastAction=npc.age;
+            }else manualSurvey.tick(true);
+            return;
+        }
         if(manualSurvey.active()){manualSurvey.stop();lastAction=npc.age;}
         switch(stone.tick()){
             case MINED, PROGRESSED -> lastAction=npc.age;
@@ -649,7 +666,7 @@ public final class ResourceGathering {
         NbtCompound data=new NbtCompound();
         data.putString("Kind",kind.name());data.putInt("Desired",desired);data.putInt("Gathered",gathered);
         data.putBoolean("Manual",manual);
-        if(manual)manualSurvey.writeNbt(data);
+        if(manual){manualSurvey.writeNbt(data);manualAccess.writeNbt(data);data.putInt("CaveSearchTicks",caveSearchTicks);}
         if(origin!=null){data.putInt("X",origin.getX());data.putInt("Y",origin.getY());data.putInt("Z",origin.getZ());}
         if(tree!=null)data.putLong("Tree",tree.asLong());
         data.putLongArray("Logs",treeLogs.stream().mapToLong(BlockPos::asLong).toArray());
@@ -660,7 +677,7 @@ public final class ResourceGathering {
         // activity must never bleed into the restored task. Only durable goals,
         // ownership and deferred trees are read from NBT.
         mining.reset();stone.reset();pausedAt=-1;kind=Kind.NONE;tree=null;animal=null;
-        manualSurvey.reset();
+        manualSurvey.reset();manualAccess.readNbt(new NbtCompound());caveSearchTicks=0;
         lootTarget=null;lootStarted=0;nextDropScan=0;nextRoute=0;nextSearch=0;nextPreyScan=0;
         waypoint=null;waypointIndex=0;idleCooldown=0;searching=false;searchCenter=null;searchColumn=0;
         lastLocation=npc.getPos();noProgressTicks=0;attackCooldown=0;
@@ -678,7 +695,7 @@ public final class ResourceGathering {
         try {kind=Kind.valueOf(data.getString("Kind"));}catch(IllegalArgumentException ex){kind=Kind.NONE;}
         desired=Math.max(1,Math.min(264,data.getInt("Desired")));gathered=Math.max(0,data.getInt("Gathered"));
         manual=data.getBoolean("Manual");origin=new BlockPos(data.getInt("X"),data.getInt("Y"),data.getInt("Z"));
-        manualSurvey.readNbt(data);
+        manualSurvey.readNbt(data);manualAccess.readNbt(data);caveSearchTicks=Math.max(0,Math.min(180,data.getInt("CaveSearchTicks")));
         if(data.contains("Tree"))tree=BlockPos.fromLong(data.getLong("Tree"));
         for(long pos:data.getLongArray("Logs"))if(treeLogs.size()<160)treeLogs.add(BlockPos.fromLong(pos));
         lastAction=npc.age;

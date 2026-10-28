@@ -1,0 +1,197 @@
+package dev.aiplayer.ai.navigation;
+
+import dev.aiplayer.ai.*;
+import dev.aiplayer.ai.brain.ResourcePlan;
+import dev.aiplayer.baritone.*;
+import dev.aiplayer.baritone.Position;
+import dev.aiplayer.entity.CompanionEntity;
+import net.minecraft.block.*;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.item.*;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.Hand;
+import net.minecraft.util.math.*;
+import net.minecraft.world.GameRules;
+import java.util.*;
+import java.util.function.Predicate;
+
+/** A local Baritone graph whose costly edges are executed, not teleported.
+ * Walking competes with cutting natural headroom and placing real footings.
+ * Each edge is revalidated against the live world before any modification. */
+public final class PreparedRoute {
+    private final CompanionEntity npc;
+    private final Predicate<BlockPos> boundary;
+    private final PhysicalMining mining;
+    private final ArrayDeque<BlockPos> steps=new ArrayDeque<>();
+    private int started, nextSearch, lastMove,requiredSupports;
+    private Vec3d last;
+    private UUID supplyDrop;
+    private double dropDistance;
+    private int dropProgress;
+    private final Map<UUID,Integer> unavailableDrops=new HashMap<>();
+    private String status="Preparar passagem";
+    public PreparedRoute(CompanionEntity npc,Predicate<BlockPos> boundary){
+        this.npc=npc;this.boundary=boundary;mining=new PhysicalMining(npc);
+    }
+    public boolean active(){return !steps.isEmpty();}
+    public String status(){return status;}
+    public String diagnostics(){return status+" next="+steps.peek()+" remaining="+steps.size()+" supplies="+requiredSupports+" supplyDrop="+supplyDrop;}
+    public void pause(){steps.clear();mining.reset();last=null;requiredSupports=0;}
+    private ServerWorld world(){return (ServerWorld)npc.getWorld();}
+    private boolean loaded(BlockPos p){return boundary.test(p) && world().isChunkLoaded(p)
+        && world().getWorldBorder().contains(p) && p.getY()>world().getBottomY()+1 && p.getY()<world().getTopY()-2;}
+    private boolean dry(BlockPos p){return loaded(p) && world().getFluidState(p).isEmpty();}
+    private boolean clear(BlockPos p){return dry(p) && world().getBlockState(p).getCollisionShape(world(),p).isEmpty()
+        && !hazard(p);}
+    private boolean hazard(BlockPos p){var s=world().getBlockState(p);return s.isOf(Blocks.FIRE) || s.isOf(Blocks.SOUL_FIRE)
+        || s.isOf(Blocks.MAGMA_BLOCK) || s.isOf(Blocks.CACTUS) || s.isOf(Blocks.POWDER_SNOW)
+        || s.isOf(Blocks.CAMPFIRE) || s.isOf(Blocks.SOUL_CAMPFIRE) || s.isOf(Blocks.SWEET_BERRY_BUSH);}
+    private boolean solid(BlockPos p){return dry(p) && !hazard(p) && world().getBlockState(p).isSolidBlock(world(),p);}
+    private boolean editable(BlockPos p){return dry(p) && world().getBlockEntity(p)==null
+        && !OwnedBlocks.get(world()).protectedBlock(p) && !OwnedBlocks.get(world()).claimed(p);}
+    private ItemStack tool(BlockState state){
+        ItemStack best=npc.getMainHandStack();
+        if(npc.autoEquip)for(int i=0;i<npc.backpack.size();i++){
+            var candidate=npc.backpack.getStack(i);
+            if(!ResourcePlan.worn(candidate) && candidate.getMiningSpeedMultiplier(state)>best.getMiningSpeedMultiplier(state))best=candidate;
+        }
+        return best;
+    }
+    private double cutCost(BlockPos p){
+        if(clear(p))return 0;
+        if(!editable(p))return Double.POSITIVE_INFINITY;
+        var s=world().getBlockState(p);
+        if(!SafeExcavation.isExcavatableMaterial(s) && !s.isIn(net.minecraft.registry.tag.BlockTags.LEAVES))return Double.POSITIVE_INFINITY;
+        if(world().getBlockState(p.up()).getBlock() instanceof FallingBlock)return Double.POSITIVE_INFINITY;
+        for(Direction d:Direction.values())if(!dry(p.offset(d)))return Double.POSITIVE_INFINITY;
+        ItemStack tool=tool(s);
+        if(s.isToolRequired() && (!tool.isSuitableFor(s) || ResourcePlan.worn(tool)))return Double.POSITIVE_INFINITY;
+        float hardness=s.getHardness(world(),p);
+        return hardness<0?Double.POSITIVE_INFINITY:Math.max(1,hardness*30/Math.max(1,tool.getMiningSpeedMultiplier(s)));
+    }
+    private ItemStack support(){
+        for(Item item:new Item[]{Items.DIRT,Items.COBBLESTONE,Items.COBBLED_DEEPSLATE}){
+            for(int i=0;i<npc.backpack.size();i++)if(npc.backpack.getStack(i).isOf(item))return npc.backpack.getStack(i);
+            if(npc.getMainHandStack().isOf(item))return npc.getMainHandStack();
+        }
+        return ItemStack.EMPTY;
+    }
+    private boolean bridgeCell(BlockPos p){
+        // Place into observed dry air from an attached edge; the executor
+        // completes each support before allowing the NPC to step over it.
+        return editable(p) && world().getBlockState(p).isAir() && dry(p.down()) && !hazard(p.down());
+    }
+    private Iterable<Step> neighbors(Position from){
+        var result=new ArrayList<Step>();BlockPos base=new BlockPos(from.x(),from.y(),from.z());
+        for(Direction d:Direction.Type.HORIZONTAL)for(int dy:new int[]{0,1,-1}){
+            BlockPos next=base.offset(d).up(dy);
+            if(!loaded(next.up()) || !loaded(next.down()))continue;
+            double cut=cutCost(next)+cutCost(next.up());
+            if(dy>0)cut+=cutCost(base.up(2));
+            if(dy<0)cut+=cutCost(next.up(2));
+            boolean place=!solid(next.down());
+            if(!Double.isFinite(cut) || (place && (!bridgeCell(next.down()) || dy!=0)))continue;
+            double cost=5+Math.abs(dy)*3+cut+(place?18:0);
+            result.add(new Step(new Position(next.getX(),next.getY(),next.getZ()),cost,
+                place?Movement.PLACE:cut>0?Movement.DIG:dy>0?Movement.ASCEND:dy<0?Movement.DESCEND:Movement.TRAVERSE));
+        }
+        return result;
+    }
+    public boolean begin(BlockPos destination,int radius){return plan(destination,radius,Double.POSITIVE_INFINITY);}
+    public boolean cheaperThanWalking(BlockPos destination,int walkNodes){return plan(destination,0,Math.max(0,walkNodes-1)*5.0);}
+    private boolean plan(BlockPos destination,int radius,double walkingCost){
+        if(active())return tick();
+        if(npc.age<nextSearch || !npc.isOnGround() || npc.isTouchingWater())return false;
+        nextSearch=npc.age+20;
+        if(!world().getGameRules().getBoolean(GameRules.DO_MOB_GRIEFING)
+                || !world().getGameRules().getBoolean(GameRules.DO_TILE_DROPS))return false;
+        BlockPos at=npc.getBlockPos();
+        SearchResult result=new AStarPathFinder().search(new Position(at.getX(),at.getY(),at.getZ()),
+            new GoalNear(destination.getX(),destination.getY(),destination.getZ(),radius),this::neighbors,new SearchLimits(2048,32));
+        if(!result.complete() || result.steps().isEmpty() || result.cost()>=walkingCost)return false;
+        // Execute a bounded complete local segment; arrival is still physical.
+        requiredSupports=(int)result.steps().stream().filter(edge->edge.movement()==Movement.PLACE).count();
+        for(Step edge:result.steps())steps.add(new BlockPos(edge.destination().x(),edge.destination().y(),edge.destination().z()));
+        started=npc.age;last=npc.getPos();lastMove=0;npc.getNavigation().stop();return tick();
+    }
+    private int supportCount(){
+        int count=0;for(Item item:new Item[]{Items.DIRT,Items.COBBLESTONE,Items.COBBLED_DEEPSLATE}){
+            count+=npc.backpack.count(item);if(npc.getMainHandStack().isOf(item))count+=npc.getMainHandStack().getCount();
+        }return count;
+    }
+    private boolean obtainSupports(){
+        status="Recolher terra para preparar os apoios do caminho";
+        if(!npc.autoLoot)return false;
+        unavailableDrops.entrySet().removeIf(e->e.getValue()<=npc.age);
+        var drops=world().getEntitiesByClass(net.minecraft.entity.ItemEntity.class,npc.getBoundingBox().expand(6),
+            drop->drop.isAlive() && drop.getStack().isOf(Items.DIRT) && !drop.cannotPickup()
+                && !unavailableDrops.containsKey(drop.getUuid()) && drop.getCommandTags().contains("aiplayer_drop_"+npc.getUuid()) && dry(drop.getBlockPos()));
+        if(!drops.isEmpty()){
+            var drop=drops.stream().min(Comparator.comparingDouble(npc::squaredDistanceTo)).orElseThrow();
+            double distance=npc.squaredDistanceTo(drop);
+            if(!drop.getUuid().equals(supplyDrop) || distance<dropDistance-0.1){supplyDrop=drop.getUuid();dropDistance=distance;dropProgress=npc.age;}
+            if(npc.age-dropProgress>160){unavailableDrops.put(drop.getUuid(),npc.age+200);supplyDrop=null;return false;}
+            if(!npc.survival().canCollect(drop))WorkNavigation.moveToDrop(npc,drop,1);
+            started=npc.age;return true;
+        }
+        BlockPos feet=npc.getBlockPos();
+        for(BlockPos p:BlockPos.iterate(feet.add(-3,-1,-3),feet.add(3,1,3))){
+            if(!loaded(p) || !editable(p) || p.equals(feet.down()) || occupied(p) || occupied(p.up())
+                || steps.contains(p.up()) || !solid(p.down()) || !mining.reachable(p))continue;
+            var state=world().getBlockState(p);
+            if(!(state.isOf(Blocks.DIRT) || state.isOf(Blocks.GRASS_BLOCK)) || !Double.isFinite(cutCost(p)))continue;
+            if(mining.tick(p.toImmutable())){npc.intelligence().restoration().removed(p);started=npc.age;}
+            return true;
+        }
+        return false;
+    }
+    private boolean occupied(BlockPos p){return !world().getEntitiesByClass(LivingEntity.class,new Box(p).contract(0.001),LivingEntity::isAlive).isEmpty();}
+    public boolean tick(){
+        if(!active())return false;
+        if(npc.menuOpen() || npc.isEating() || npc.getTarget()!=null){mining.reset();return true;}
+        if(npc.isTouchingWater() || !world().getGameRules().getBoolean(GameRules.DO_MOB_GRIEFING)
+            || !world().getGameRules().getBoolean(GameRules.DO_TILE_DROPS)){pause();return false;}
+        requiredSupports=(int)steps.stream().filter(p->!solid(p.down())).count();
+        if(requiredSupports>supportCount()){
+            if(obtainSupports())return true;pause();return false;
+        }
+        BlockPos next=steps.peek();
+        if(npc.getPos().squaredDistanceTo(Vec3d.ofBottomCenter(next))<0.3 && Math.abs(npc.getY()-next.getY())<0.15){
+            steps.remove();mining.reset();started=npc.age;last=npc.getPos();return active();
+        }
+        if(last==null || npc.getPos().squaredDistanceTo(last)>0.1){started=npc.age;last=npc.getPos();}
+        if(npc.age-started>200 || npc.getBlockPos().getManhattanDistance(next)>4){pause();return false;}
+        BlockPos base=npc.getBlockPos();
+        ArrayList<BlockPos> cuts=new ArrayList<>();
+        if(next.getY()>base.getY())cuts.add(base.up(2));
+        if(next.getY()<base.getY())cuts.add(next.up(2));
+        cuts.add(next.up());cuts.add(next);
+        for(BlockPos cut:cuts){
+            if(clear(cut))continue;
+            if(!Double.isFinite(cutCost(cut)) || occupied(cut) || occupied(cut.up()) || cut.equals(base.down())){pause();return false;}
+            npc.getNavigation().stop();status="Abrir passagem com a ferramenta adequada";
+            if(mining.reachable(cut)){if(mining.tick(cut)){npc.intelligence().restoration().removed(cut);started=npc.age;}}
+            return true;
+        }
+        BlockPos floor=next.down();
+        if(!solid(floor)){
+            ItemStack stack=support();
+            if(!bridgeCell(floor) || stack.isEmpty() || occupied(floor) || npc.getEyePos().squaredDistanceTo(Vec3d.ofCenter(floor))>4.5*4.5){pause();return false;}
+            boolean adjacent=false;for(Direction d:Direction.values())if(solid(floor.offset(d))){adjacent=true;break;}
+            if(!adjacent){pause();return false;}
+            npc.getNavigation().stop();status="Colocar apoio com um bloco da mochila";
+            if(world().setBlockState(floor,((BlockItem)stack.getItem()).getBlock().getDefaultState(),3)){
+                stack.decrement(1);requiredSupports=Math.max(0,requiredSupports-1);npc.backpack.markDirty();OwnedBlocks.get(world()).claim(floor,npc.getUuid());
+                npc.swingHand(Hand.MAIN_HAND);started=npc.age;
+            }
+            return true;
+        }
+        if(npc.age-lastMove>=10 || npc.getNavigation().isIdle()){
+            lastMove=npc.age;status="Percorrer a passagem preparada";
+            var path=WorkNavigation.findPath(npc,next,0,NpcPathfinder.Mode.WORK,boundary);
+            if(path!=null && path.reachesTarget())npc.getNavigation().startMovingAlong(path,1);
+            else if(base.getManhattanDistance(next)<=2)npc.getMoveControl().moveTo(next.getX()+0.5,next.getY(),next.getZ()+0.5,1);
+        }
+        return true;
+    }
+}

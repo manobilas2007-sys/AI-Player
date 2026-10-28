@@ -43,6 +43,7 @@ public final class ProjectMaterials {
     private final CompanionEntity npc;
     private final ProjectWork work;
     private final PhysicalMining mining;
+    private final MaterialExcavation excavation;
     private Item log=Items.OAK_LOG,planks=Items.OAK_PLANKS;
     private Item miningFor,scanFor,crafting,smelting,dropFor;
     private BlockPos target,scanOrigin,furnace,bench,preferredFurnace,preferredBench;
@@ -78,6 +79,7 @@ public final class ProjectMaterials {
 
     public ProjectMaterials(CompanionEntity npc,ProjectWork work){
         this.npc=npc;this.work=work;this.mining=new PhysicalMining(npc,this::allowedTool);
+        excavation=new MaterialExcavation(npc,work,mining,p->worksite==null || !worksite.contains(Vec3d.ofCenter(p)));
     }
     public void selectWood(Item selectedLog,Item selectedPlanks){
         if(selectedLog==null || selectedPlanks==null || !(selectedLog instanceof BlockItem)
@@ -124,6 +126,7 @@ public final class ProjectMaterials {
             +" searchWait="+(searchAt-npc.age)+" drop="+drop+" dropFor="+itemId(dropFor)+" dropAge="+(npc.age-dropProgressAt)
             +" recipe="+itemId(crafting)+":"+craftTicks+" axePending="+axePending+" woodReceived="+woodReceived
             +" smelt="+itemId(smelting)+" oven={"+ovenState+"}"
+            +" access={"+excavation.diagnostics()+"} restoration={"+npc.intelligence().restoration().diagnostics()+"}"
             +" bench="+bench+" preferredBench="+preferredBench+" furnace="+furnace+" preferredFurnace="+preferredFurnace;
     }
     private String itemId(Item item){return item==null?"none":Registries.ITEM.getId(item).toString();}
@@ -132,9 +135,9 @@ public final class ProjectMaterials {
         if(npc.getMainHandStack().isOf(item))result+=npc.getMainHandStack().getCount();
         return result;
     }
-    public void pause(){mining.reset();npc.clearWorkingVisual();}
+    public void pause(){excavation.pause();mining.reset();npc.clearWorkingVisual();}
     public void cancel(){
-        pause();target=null;scanFor=null;miningFor=null;crafting=null;smelting=null;craftTicks=0;
+        excavation.cancel();pause();target=null;scanFor=null;miningFor=null;crafting=null;smelting=null;craftTicks=0;
         // Stations belong to the cancelled project, not to every future job.
         // Keeping an old preferred site can route the next build back to a
         // distant farm instead of creating its own nearby workbench/furnace.
@@ -173,6 +176,8 @@ public final class ProjectMaterials {
         String current=world.getRegistryKey().getValue().toString();
         if(!dimension.isEmpty() && !dimension.equals(current)){cancel();furnace=null;bench=null;preferredFurnace=null;preferredBench=null;}
         dimension=current;
+        excavation.finishIfReady();
+        if(npc.intelligence().restoration().pending()){npc.intelligence().restoration().tick();status="Sair da escavação e fechar somente a superfície com terra";return false;}
         // A broken block still has a pickup delay. Only actual inventory is
         // proof that the project's first wood has been physically delivered.
         if(count(log)>0 || count(planks)>0)woodReceived=true;
@@ -215,7 +220,7 @@ public final class ProjectMaterials {
             crafting=null;craftTicks=0;return false;
         }
         if(item==log || item==Items.COBBLESTONE || item==Items.SAND || item==Items.COAL
-                || item==Items.RAW_IRON || item==Items.DIRT)return gather(world,item,depth+1);
+                || item==Items.RAW_IRON || item==Items.DIRT)return gather(world,item,amount,depth+1);
         status="Preciso de "+label(item)+" real para continuar";return false;
     }
     private String label(Item item){return item.getName().getString();}
@@ -428,6 +433,10 @@ public final class ProjectMaterials {
         return charcoal && count(planks)>0?planks:null;
     }
     private boolean allowedTool(ItemStack stack){
+        if(excavation!=null && excavation.active() && mining.target()!=null){
+            BlockState excavated=npc.getWorld().getBlockState(mining.target());
+            if(excavated.isToolRequired() && (!stack.isSuitableFor(excavated) || ResourcePlan.worn(stack)))return false;
+        }
         if(!npc.autoEquip && stack!=npc.getMainHandStack())return false;
         if(target!=null && miningFor!=null && (miningFor==Items.COBBLESTONE || miningFor==Items.RAW_IRON || miningFor==Items.COAL)){
             BlockState state=npc.getWorld().getBlockState(target);
@@ -483,13 +492,16 @@ public final class ProjectMaterials {
         var hit=world.raycast(new RaycastContext(eyes,end,RaycastContext.ShapeType.COLLIDER,RaycastContext.FluidHandling.NONE,npc));
         return hit.getType()==HitResult.Type.MISS || hit.getBlockPos().equals(pos);
     }
-    private boolean gather(ServerWorld world,Item item,int depth){
+    private boolean gather(ServerWorld world,Item item,int amount,int depth){
         if(!npc.autoLoot){status="Ative a coleta de drops para obter "+label(item);return false;}
         avoidedDrops.entrySet().removeIf(entry->entry.getValue()<=npc.age);
         List<ItemEntity> drops=world.getEntitiesByClass(ItemEntity.class,npc.getBoundingBox().expand(32),
             drop->drop.isAlive() && drop.getStack().isOf(item) && !drop.cannotPickup()
                 && !avoidedDrops.containsKey(drop.getUuid()) && npc.backpack.canInsert(drop.getStack()));
-        if(!drops.isEmpty()){
+        // The stair owns movement until its supported step is open. A drop
+        // route can otherwise put the NPC on the next unmined step, forcing
+        // the safety check to abort its own return corridor.
+        if(!drops.isEmpty() && !(excavation.digging() && excavation.item()==item)){
             ItemEntity nearest=drops.stream().min(Comparator.comparingDouble(npc::squaredDistanceTo)).orElseThrow();
             double distance=npc.squaredDistanceTo(nearest);
             if(!nearest.getUuid().equals(dropTarget) || dropFor!=item){
@@ -503,6 +515,7 @@ public final class ProjectMaterials {
                 npc.getNavigation().stop();status="Procurar outro material com acesso seguro";return false;
             }
             status="Recolher fisicamente "+label(item);
+            if(npc.isTouchingWater()){npc.intelligence().recoverForWork();return false;}
             if(!npc.survival().canCollect(nearest) && npc.age>=nextRoute){nextRoute=npc.age+10;WorkNavigation.moveToDrop(npc,nearest,1.0);}
             return false;
         }
@@ -526,11 +539,16 @@ public final class ProjectMaterials {
         }
         BlockState required=item==Items.RAW_IRON?Blocks.IRON_ORE.getDefaultState():Blocks.STONE.getDefaultState();
         if((item==Items.COBBLESTONE || item==Items.COAL || item==Items.RAW_IRON) && !suitablePick(required)){
+            if(excavation.active()){excavation.cancel();if(npc.intelligence().restoration().pending())return false;}
             if(!npc.autoEquip){status="Equipe uma picareta adequada ou ative equipamento automático";return false;}
             Item replacement=item==Items.RAW_IRON?Items.STONE_PICKAXE:Items.WOODEN_PICKAXE;
             // A worn stack is still an item but cannot satisfy this mining
             // prerequisite. Require an additional actual pick before mining.
             if(!ensure(world,replacement,count(replacement)+1,depth+1))return false;
+        }
+        if(MaterialExcavation.underground(item)){
+            excavation.observe(item,amount);
+            if(excavation.travellingToCave() && excavation.item()==item){excavation.tick();status=excavation.status();return false;}
         }
         // A source already observed outside the house remains known after a
         // new wall obscures it. Physical approach/mining still require sight.
@@ -546,24 +564,31 @@ public final class ProjectMaterials {
             lastTargetTick=npc.age;
             if(distance<bestTargetDistance-0.2){bestTargetDistance=distance;targetSince=npc.age;}
             if(npc.age-targetSince>220){npc.intelligence().memory().failed(target,world.getTime());target=null;mining.reset();return false;}
-            if(!work.approach(target))return false;
+            if(!work.approach(target)){status=work.status()+" para obter "+label(item);return false;}
             if(mining.tick(target)){
                 if(item==log)woodHarvests++;
                 target=null;scanFor=null;
             }
             return false;
         }
+        if(excavation.active() && excavation.item()==item){
+            excavation.tick();status=excavation.status();
+            if(npc.intelligence().restoration().pending())return false;
+        }
         if(npc.age<searchAt)return false;
         Survey survey=surveys.get(item);
-        if(survey!=null && survey.active)surveyStep(world,item);
+        if(survey!=null && survey.active && !excavation.active())surveyStep(world,item);
         if(scanFor!=item || scanOrigin==null || scanOrigin.getSquaredDistance(npc.getBlockPos())>8*8){
             scanFor=item;scanOrigin=npc.getBlockPos().toImmutable();scanRadius=0;scanY=0;scanEdge=0;
         }
         for(int i=0;i<SCAN_PER_TICK;i++){
             if(scanRadius>SEARCH_RADIUS){
                 scans++;scanRadius=0;scanY=0;scanEdge=0;searchAt=npc.age+40;
-                status="Explorar novos trechos para encontrar "+label(item);
-                surveyStep(world,item);return false;
+                if(MaterialExcavation.underground(item)){
+                    if(!excavation.active())excavation.begin(item,amount);
+                    status=excavation.status();
+                }else{status="Explorar novos trechos para encontrar "+label(item);surveyStep(world,item);}
+                return false;
             }
             int radius=scanRadius,edge=scanEdge;
             int dx=0,dz=0;
@@ -577,13 +602,14 @@ public final class ProjectMaterials {
             BlockPos candidate=scanOrigin.add(dx,dy,dz);
             if(++scanEdge>=Math.max(1,8*scanRadius)){scanEdge=0;if(++scanY>=25){scanY=0;scanRadius++;}}
             if(safeTarget(world,candidate,item,true)){
+                if(excavation.digging())excavation.pause();
                 target=candidate.toImmutable();miningFor=item;targetSince=npc.age;bestTargetDistance=Double.MAX_VALUE;
                 lastTargetTick=npc.age;
                 npc.intelligence().memory().remember(item==Items.RAW_IRON?"iron":item==Items.COAL?"coal":item==log?"wood":"material",target,world.getTime(),24000);
                 status="Encontrei "+label(item)+"; ir buscar";return false;
             }
         }
-        status="Procurar "+label(item)+" em blocos naturais visíveis";return false;
+        status=excavation.active()?excavation.status():"Procurar acesso seguro a "+label(item);return false;
     }
     private boolean wornAxe(){
         if(npc.getMainHandStack().getItem() instanceof AxeItem && ResourcePlan.worn(npc.getMainHandStack()))return true;
@@ -644,6 +670,7 @@ public final class ProjectMaterials {
             saved.putBoolean("Active",survey.active);search.put(itemId(entry.getKey()),saved);
         }
         n.put("Surveys",search);
+        excavation.writeNbt(n);
         NbtCompound supplies=new NbtCompound();
         for(var entry:smeltSupplies.entrySet()){
             NbtCompound saved=new NbtCompound();saved.putString("Item",itemId(entry.getValue().item()));
@@ -671,6 +698,7 @@ public final class ProjectMaterials {
                 && n.getInt("PendingAmount")>0 && n.getInt("PendingAmount")<=2048){
             pendingItem=Registries.ITEM.get(requested);pendingAmount=n.getInt("PendingAmount");
         }
+        excavation.readNbt(n);
         NbtCompound search=n.getCompound("Surveys");
         for(Item item:new Item[]{log,Items.COBBLESTONE,Items.SAND,Items.COAL,Items.RAW_IRON,Items.DIRT}){
             if(!search.contains(itemId(item)))continue;

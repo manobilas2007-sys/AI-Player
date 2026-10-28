@@ -58,7 +58,7 @@ public final class CompanionChunkLoading {
     private static boolean working(CompanionEntity npc){
         return npc.isAlive() && !npc.isRemoved() && npc.ownerId()!=null
             && (npc.tasks().active() || npc.gathering().active() || npc.gathering().hasCleanup()
-                || npc.crafting().hasSession()
+                || npc.crafting().hasSession() || npc.intelligence().restoration().pending()
                 || (npc.mode()!=Mode.WAIT && !npc.getNavigation().isIdle()));
     }
     private static void tick(ServerWorld world){

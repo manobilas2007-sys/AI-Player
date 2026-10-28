@@ -33,13 +33,14 @@ import java.util.List;
 public final class ProjectWork {
     private final CompanionEntity npc;
     private final PhysicalMining mining;
+    private final dev.aiplayer.ai.navigation.PreparedRoute prepared;
     private BlockPos goal, stance, boundary, placement;
     private Vec3d point, last;
     private String purpose="", status="Preparar trabalho";
     private int nextRoute, stagnantSince, placeTicks, radius;
     private record Stance(BlockPos feet,Vec3d point) {}
 
-    public ProjectWork(CompanionEntity npc){this.npc=npc;mining=new PhysicalMining(npc);}
+    public ProjectWork(CompanionEntity npc){this.npc=npc;mining=new PhysicalMining(npc);prepared=new dev.aiplayer.ai.navigation.PreparedRoute(npc,this::allowed);}
     public String status(){return status;}
     public String diagnostics(){
         Path path=npc.getNavigation().getCurrentPath();
@@ -52,12 +53,12 @@ public final class ProjectWork {
         return "work="+status+" goal="+goal+" stance="+stance+" point="+point+" purpose="+purpose
             +" path="+(path==null?"none":path.getCurrentNodeIndex()+"/"+path.getLength()+" end="+path.getEnd())
             +" idle="+npc.getNavigation().isIdle()+" onGround="+npc.isOnGround()+" pos="+npc.getPos()
-            +" sight="+sight+" stalled="+(npc.age-stagnantSince)+" routeIn="+Math.max(0,nextRoute-npc.age);
+            +" prepared={"+prepared.diagnostics()+"} sight="+sight+" stalled="+(npc.age-stagnantSince)+" routeIn="+Math.max(0,nextRoute-npc.age);
     }
     /** Horizontal area around the original order; height is checked separately. */
     public void setBoundary(BlockPos origin,int radius){boundary=origin.toImmutable();this.radius=Math.max(1,Math.min(100,radius));resetRoute();}
     public void clearBoundary(){boundary=null;radius=0;resetRoute();}
-    public void pause(){mining.reset();placement=null;placeTicks=0;resetRoute();npc.clearWorkingVisual();}
+    public void pause(){prepared.pause();mining.reset();placement=null;placeTicks=0;resetRoute();npc.clearWorkingVisual();}
     public void cancel(){pause();boundary=null;radius=0;nextRoute=0;status="Trabalho cancelado";}
     private ServerWorld world(){return npc.getWorld() instanceof ServerWorld server?server:null;}
     private boolean validDestination(BlockPos pos){
@@ -73,7 +74,7 @@ public final class ProjectWork {
         long dx=(long)pos.getX()-boundary.getX(),dz=(long)pos.getZ()-boundary.getZ();
         return dx*dx+dz*dz<=(long)radius*radius;
     }
-    private void resetRoute(){goal=null;stance=null;point=null;last=null;purpose="";npc.getNavigation().stop();}
+    private void resetRoute(){prepared.pause();goal=null;stance=null;point=null;last=null;purpose="";npc.getNavigation().stop();}
     private boolean rules(){
         ServerWorld world=world();
         if(world!=null && world.getGameRules().getBoolean(GameRules.DO_MOB_GRIEFING)
@@ -168,12 +169,20 @@ public final class ProjectWork {
         Path path=WorkNavigation.findPath(npc,candidate.feet(),0,
             dev.aiplayer.ai.navigation.NpcPathfinder.Mode.WORK,this::allowed);
         if(path==null || !WorkNavigation.surfacePath(npc,path,candidate.feet().getY()))return false;
+        // Compare long detours with the same local cost graph that accounts
+        // for real cutting time and support placement, before committing.
+        if(path.getLength()>Math.sqrt(candidate.feet().getSquaredDistance(npc.getBlockPos()))+6
+                && prepared.cheaperThanWalking(candidate.feet(),path.getLength())){
+            goal=target.toImmutable();purpose=action;stance=candidate.feet();point=candidate.point();
+            last=npc.getPos();stagnantSince=npc.age;return true;
+        }
         npc.getNavigation().stop();
         if(!npc.getNavigation().startMovingAlong(path,1.0))return false;
         goal=target.toImmutable();purpose=action;stance=candidate.feet().toImmutable();point=candidate.point();last=npc.getPos();stagnantSince=npc.age;
         return true;
     }
     public boolean approach(BlockPos target){
+        if(npc.isTouchingWater() && npc.intelligence().recoverForWork()){status="Sair da água antes de retomar o trabalho";return false;}
         if(!validDestination(target)){status="Alvo fora da área autorizada";return false;}
         // A remembered station/site may be outside the currently loaded area.
         // Travel through local terrain; only inspect/interact with it on arrival.
@@ -181,10 +190,13 @@ public final class ProjectWork {
         if(!npc.getBoundingBox().intersects(new Box(target)) && inReach(target,npc.getEyePos())){
             resetRoute();return true;
         }
+        if(!prepared.active() && npc.intelligence().recoverForWork()){status="Sair do bloqueio antes de retomar o trabalho";return false;}
         status="Chegar fisicamente ao local de trabalho";
         if(Math.abs(npc.getBlockX()-target.getX())>30 || Math.abs(npc.getBlockZ()-target.getZ())>30){
             moveTo(target);return false;
         }
+        if(prepared.active() && (!target.equals(goal) || !purpose.equals("work")))prepared.pause();
+        if(prepared.active() && prepared.tick()){status=prepared.status();return false;}
         if(retaining(target,"work"))return false;
         if(npc.age<nextRoute)return false;
         nextRoute=npc.age+10;
@@ -195,11 +207,13 @@ public final class ProjectWork {
         }
         options.sort(Comparator.comparingDouble(candidate->candidate.point().squaredDistanceTo(npc.getPos())));
         for(int i=0;i<Math.min(12,options.size());i++)if(start(target,"work",options.get(i)))return false;
+        if(!options.isEmpty() && prepared.begin(options.get(0).feet(),0)){goal=target.toImmutable();purpose="work";stance=null;status=prepared.status();return false;}
         status="Aguardar caminho seguro até o trabalho";return false;
     }
     /** Routes in local loaded segments. The result means actual arrival at the
      * requested feet cell, never successful calculation of an intermediate path. */
     public boolean moveTo(BlockPos destination){
+        if((!prepared.active() || npc.isTouchingWater()) && npc.intelligence().recoverForWork()){status="Preparar uma saída segura";return false;}
         if(!validDestination(destination)){status="Destino fora da área autorizada";return false;}
         if(Math.abs(npc.getY()-destination.getY())<0.25
                 && npc.squaredDistanceTo(Vec3d.ofBottomCenter(destination))<0.65){resetRoute();return true;}
@@ -208,6 +222,8 @@ public final class ProjectWork {
         // There is no strictly closer cell to replan to in that case.
         if(center(destination,Vec3d.ofBottomCenter(destination)))return false;
         status="Caminhar por etapas até o destino";
+        if(prepared.active() && (!destination.equals(goal) || !purpose.equals("walk")))prepared.pause();
+        if(prepared.active() && prepared.tick()){status=prepared.status();return false;}
         if(retaining(destination,"walk"))return false;
         if(npc.age<nextRoute)return false;nextRoute=npc.age+10;
         int dx=destination.getX()-npc.getBlockX(),dz=destination.getZ()-npc.getBlockZ();
@@ -224,6 +240,7 @@ public final class ProjectWork {
         }
         choices.sort(Comparator.comparingDouble(candidate->candidate.feet().getSquaredDistance(destination)));
         for(int i=0;i<Math.min(12,choices.size());i++)if(start(destination,"walk",choices.get(i)))return false;
+        if(prepared.begin(choices.isEmpty()?toward:choices.get(0).feet(),0)){goal=destination.toImmutable();purpose="walk";stance=null;status=prepared.status();return false;}
         status="Aguardar uma etapa carregada e segura do caminho";return false;
     }
     public boolean replaceable(BlockPos pos){

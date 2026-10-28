@@ -17,9 +17,13 @@ public final class TerrainRecovery {
     private boolean active;
     private Vec3d recoveryAnchor;
     private int stationarySince, stepStarted;
+    private int nextWaterRoute;
+    private BlockPos waterCut;
+    private Vec3d waterProgress;
+    private int waterStalled;
     private final java.util.Map<BlockPos,Integer> failedSteps=new java.util.HashMap<>();
     public TerrainRecovery(CompanionEntity npc){this.npc=npc;mining=new PhysicalMining(npc);supports=new TemporaryPillar(npc);}
-    private boolean clear(BlockPos p){return npc.getWorld().getBlockState(p).getCollisionShape(npc.getWorld(),p).isEmpty()
+    private boolean clear(BlockPos p){return npc.getWorld().isChunkLoaded(p) && npc.getWorld().getBlockState(p).getCollisionShape(npc.getWorld(),p).isEmpty()
         && npc.getWorld().getFluidState(p).isEmpty();}
     private boolean soil(BlockPos p){
         var world=npc.getWorld();var s=world.getBlockState(p);
@@ -43,7 +47,42 @@ public final class TerrainRecovery {
         return walls==4 || ((walls>=2 || (walls>=1 && !TemporaryPillar.hasJumpSpace(npc))) && npc.age-stationarySince>=60);
     }
     public void pause(){mining.reset();}
+    private boolean leaveWater(){
+        if(!npc.isTouchingWater()){waterCut=null;waterProgress=null;return false;}
+        if(waterCut!=null){
+            if(clear(waterCut)){waterCut=null;mining.reset();}
+            else if(soil(waterCut) && mining.reachable(waterCut)){mining.tick(waterCut);return true;}
+            else {waterCut=null;mining.reset();}
+        }
+        npc.getJumpControl().setActive();
+        if(waterProgress==null || npc.squaredDistanceTo(waterProgress)>0.1){waterProgress=npc.getPos();waterStalled=npc.age;}
+        if(!npc.getNavigation().isIdle() && npc.age-waterStalled<60)return true;
+        if(npc.age<nextWaterRoute)return true;
+        nextWaterRoute=npc.age+15;
+        BlockPos origin=npc.getBlockPos();
+        var options=new java.util.ArrayList<BlockPos>();
+        for(int dy=0;dy<=8;dy++)for(int x=-8;x<=8;x++)for(int z=-8;z<=8;z++){
+            BlockPos p=origin.add(x,dy,z);
+            if(npc.getWorld().isChunkLoaded(p) && npc.getWorld().isChunkLoaded(p.up())
+                    && clear(p) && clear(p.up()) && WorkNavigation.safeWorkFooting(npc,p)
+                    && npc.getWorld().isSpaceEmpty(npc,new Box(p).stretch(0,0.8,0)))options.add(p);
+        }
+        options.sort(java.util.Comparator.comparingDouble(p->p.getSquaredDistance(origin)));
+        for(int i=0;i<Math.min(16,options.size());i++){
+            var path=WorkNavigation.findPath(npc,options.get(i),0,dev.aiplayer.ai.navigation.NpcPathfinder.Mode.WATER);
+            if(path!=null && path.reachesTarget() && npc.getNavigation().startMovingAlong(path,1.1))return true;
+        }
+        // A low natural bank may need headroom before the swimmer can climb.
+        for(Direction side:Direction.Type.HORIZONTAL){
+            BlockPos bank=origin.offset(side).up();
+            if(npc.getWorld().isChunkLoaded(bank.up()) && soil(bank.up()) && clear(bank.up(2))
+                    && npc.getWorld().getBlockState(bank.down()).isSolidBlock(npc.getWorld(),bank.down())
+                    && mining.reachable(bank.up())){waterCut=bank.up();mining.tick(waterCut);return true;}
+        }
+        return true;
+    }
     public boolean tick(){
+        if(leaveWater())return true;
         if(npc.age<retryAt)return false;
         if(!active){
             if(npc.age%20!=0 || !trapped()){
@@ -63,7 +102,7 @@ public final class TerrainRecovery {
                 for(BlockPos cut:new BlockPos[]{step.up(),step}){
                     if(clear(cut))continue;
                     if(!soil(cut) || !mining.reachable(cut)){step=null;mining.reset();break;}
-                    mining.tick(cut);return true;
+                    if(mining.tick(cut))npc.intelligence().restoration().removed(cut);return true;
                 }
                 if(step!=null){
                     if(npc.age%10==0)npc.getNavigation().startMovingTo(step.getX()+0.5,step.getY(),step.getZ()+0.5,1);
@@ -101,7 +140,7 @@ public final class TerrainRecovery {
             // Only natural, unprotected material may be removed overhead. Never dismantle a roof.
             for(int dy=2;dy<=3;dy++){
                 BlockPos overhead=here.up(dy);
-                if(soil(overhead) && mining.reachable(overhead)){mining.tick(overhead);return true;}
+                if(soil(overhead) && mining.reachable(overhead)){if(mining.tick(overhead))npc.intelligence().restoration().removed(overhead);return true;}
                 if(!clear(overhead))break;
             }
         }

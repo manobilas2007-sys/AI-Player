@@ -313,7 +313,8 @@ public final class StarterCrafting {
         if(!npc.getWorld().getGameRules().getBoolean(net.minecraft.world.GameRules.DO_MOB_GRIEFING)) {blockedWork();return;}
         if(!mining.reachable(benchPos)) {
             blockedWork();
-            if(npc.age%20==0)WorkNavigation.moveNear(npc,benchPos,benchPos.getY(),1);
+            // blockedWork may defer an unreachable bench and clear its position.
+            if(benchPos!=null && npc.age%20==0)WorkNavigation.moveNear(npc,benchPos,benchPos.getY(),1);
             return;
         }
         blockedTicks=0;
@@ -357,7 +358,8 @@ public final class StarterCrafting {
         }
         if(pending.bench && !mining.reachable(benchPos)) {
             blockedWork();
-            if(npc.age%20==0)WorkNavigation.moveNear(npc,benchPos,benchPos.getY(),1);
+            // blockedWork may defer an unreachable bench and clear its position.
+            if(benchPos!=null && npc.age%20==0)WorkNavigation.moveNear(npc,benchPos,benchPos.getY(),1);
             return;
         }
         npc.getNavigation().stop();
