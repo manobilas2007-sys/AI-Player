@@ -143,7 +143,10 @@ public final class PreparedRoute {
             if(mining.tick(p.toImmutable())){npc.intelligence().restoration().removed(p);started=npc.age;}
             return true;
         }
-        return false;
+        // Picking up the previous drop can leave the worker standing on the
+        // last available soil block. Step onto real ground before mining it;
+        // never remove the block that currently supports the worker.
+        return WorkNavigation.leaveIsolatedPerch(npc);
     }
     private boolean occupied(BlockPos p){return !world().getEntitiesByClass(LivingEntity.class,new Box(p).contract(0.001),LivingEntity::isAlive).isEmpty();}
     public boolean tick(){

@@ -22,13 +22,13 @@ public final class ManualResourceSurvey {
     private Vec3d last;
     private int direction, leg=1, step, turns, since, nextRoute, scan;
     private boolean active, caveTarget, paused;
-    public ManualResourceSurvey(CompanionEntity npc){this.npc=npc;work=new ProjectWork(npc);}
+    public ManualResourceSurvey(CompanionEntity npc){this.npc=npc;work=new ProjectWork(npc,false);}
     public boolean active(){return active;}
     public void pause(){if(active && !paused)work.pause();paused=true;last=null;}
     public void stop(){pause();active=false;paused=false;waypoint=null;scanCenter=null;scan=0;}
     public void reset(){stop();direction=0;leg=1;step=0;turns=0;nextRoute=0;}
     private void advance(){
-        waypoint=null;caveTarget=false;work.pause();
+        waypoint=null;caveTarget=false;work.pause();work.allowRoutePreparation(false);
         if(++step>=leg){step=0;direction=(direction+1)%4;if(++turns%2==0)leg++;}
     }
     private boolean standable(ServerWorld world,BlockPos feet){
@@ -65,6 +65,10 @@ public final class ManualResourceSurvey {
             BlockPos entrance=observedCave(world);
             if(entrance!=null){work.pause();waypoint=entrance;caveTarget=true;last=null;}
         }
+        // Unknown survey waypoints are optional: try another heading instead
+        // of cutting an arbitrary tunnel that competes with pit recovery.
+        // An observed cave is a concrete destination and may need preparation.
+        work.allowRoutePreparation(caveTarget);
         if(waypoint!=null){
             if(last==null || npc.getPos().squaredDistanceTo(last)>0.25){last=npc.getPos();since=npc.age;}
             if(work.moveTo(waypoint))advance();

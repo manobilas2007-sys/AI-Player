@@ -34,13 +34,16 @@ public final class ProjectWork {
     private final CompanionEntity npc;
     private final PhysicalMining mining;
     private final dev.aiplayer.ai.navigation.PreparedRoute prepared;
+    private boolean routePreparation;
     private BlockPos goal, stance, boundary, placement;
     private Vec3d point, last;
     private String purpose="", status="Preparar trabalho";
     private int nextRoute, stagnantSince, placeTicks, radius;
     private record Stance(BlockPos feet,Vec3d point) {}
 
-    public ProjectWork(CompanionEntity npc){this.npc=npc;mining=new PhysicalMining(npc);prepared=new dev.aiplayer.ai.navigation.PreparedRoute(npc,this::allowed);}
+    public ProjectWork(CompanionEntity npc){this(npc,true);}
+    public ProjectWork(CompanionEntity npc,boolean routePreparation){this.npc=npc;this.routePreparation=routePreparation;mining=new PhysicalMining(npc);prepared=new dev.aiplayer.ai.navigation.PreparedRoute(npc,this::allowed);}
+    public void allowRoutePreparation(boolean enabled){if(routePreparation!=enabled){routePreparation=enabled;resetRoute();}}
     public String status(){return status;}
     public String diagnostics(){
         Path path=npc.getNavigation().getCurrentPath();
@@ -171,7 +174,7 @@ public final class ProjectWork {
         if(path==null || !WorkNavigation.surfacePath(npc,path,candidate.feet().getY()))return false;
         // Compare long detours with the same local cost graph that accounts
         // for real cutting time and support placement, before committing.
-        if(path.getLength()>Math.sqrt(candidate.feet().getSquaredDistance(npc.getBlockPos()))+6
+        if(routePreparation && path.getLength()>Math.sqrt(candidate.feet().getSquaredDistance(npc.getBlockPos()))+6
                 && prepared.cheaperThanWalking(candidate.feet(),path.getLength())){
             goal=target.toImmutable();purpose=action;stance=candidate.feet();point=candidate.point();
             last=npc.getPos();stagnantSince=npc.age;return true;
@@ -207,7 +210,7 @@ public final class ProjectWork {
         }
         options.sort(Comparator.comparingDouble(candidate->candidate.point().squaredDistanceTo(npc.getPos())));
         for(int i=0;i<Math.min(12,options.size());i++)if(start(target,"work",options.get(i)))return false;
-        if(!options.isEmpty() && prepared.begin(options.get(0).feet(),0)){goal=target.toImmutable();purpose="work";stance=null;status=prepared.status();return false;}
+        if(routePreparation && !options.isEmpty() && prepared.begin(options.get(0).feet(),0)){goal=target.toImmutable();purpose="work";stance=null;status=prepared.status();return false;}
         status="Aguardar caminho seguro até o trabalho";return false;
     }
     /** Routes in local loaded segments. The result means actual arrival at the
@@ -240,7 +243,7 @@ public final class ProjectWork {
         }
         choices.sort(Comparator.comparingDouble(candidate->candidate.feet().getSquaredDistance(destination)));
         for(int i=0;i<Math.min(12,choices.size());i++)if(start(destination,"walk",choices.get(i)))return false;
-        if(prepared.begin(choices.isEmpty()?toward:choices.get(0).feet(),0)){goal=destination.toImmutable();purpose="walk";stance=null;status=prepared.status();return false;}
+        if(routePreparation && prepared.begin(choices.isEmpty()?toward:choices.get(0).feet(),0)){goal=destination.toImmutable();purpose="walk";stance=null;status=prepared.status();return false;}
         status="Aguardar uma etapa carregada e segura do caminho";return false;
     }
     public boolean replaceable(BlockPos pos){

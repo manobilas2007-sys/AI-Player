@@ -539,7 +539,9 @@ public final class ProjectMaterials {
         }
         BlockState required=item==Items.RAW_IRON?Blocks.IRON_ORE.getDefaultState():Blocks.STONE.getDefaultState();
         if((item==Items.COBBLESTONE || item==Items.COAL || item==Items.RAW_IRON) && !suitablePick(required)){
-            if(excavation.active()){excavation.cancel();if(npc.intelligence().restoration().pending())return false;}
+            // A parent iron request may be waiting for stone gathered by its
+            // pickaxe recipe. Preserve that child expedition across ticks.
+            if(excavation.active() && excavation.item()==item){excavation.cancel();if(npc.intelligence().restoration().pending())return false;}
             if(!npc.autoEquip){status="Equipe uma picareta adequada ou ative equipamento automático";return false;}
             Item replacement=item==Items.RAW_IRON?Items.STONE_PICKAXE:Items.WOODEN_PICKAXE;
             // A worn stack is still an item but cannot satisfy this mining
