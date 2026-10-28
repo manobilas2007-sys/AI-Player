@@ -6,24 +6,41 @@ packaging test; it does not claim to execute Android/Fold Craft Launcher.
 from __future__ import annotations
 
 import argparse
+import http.client
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
+import zipfile
 
 
 def download(url: str, destination: Path) -> None:
-    if destination.exists():
+    if destination.is_file() and zipfile.is_zipfile(destination):
         return
     request = urllib.request.Request(url, headers={"User-Agent": "AI-Player-runtime-smoke"})
     temporary = destination.with_suffix(destination.suffix + ".download")
-    try:
-        with urllib.request.urlopen(request, timeout=90) as response, temporary.open("wb") as output:
-            shutil.copyfileobj(response, output)
-        temporary.replace(destination)
-    finally:
-        temporary.unlink(missing_ok=True)
+    for attempt in range(1, 4):
+        try:
+            with urllib.request.urlopen(request, timeout=45) as response, temporary.open("wb") as output:
+                shutil.copyfileobj(response, output)
+            with zipfile.ZipFile(temporary) as jar:
+                if jar.testzip() is not None:
+                    raise zipfile.BadZipFile("Downloaded JAR has a corrupt entry")
+            temporary.replace(destination)
+            return
+        except (urllib.error.URLError, TimeoutError, ConnectionError,
+                http.client.IncompleteRead, zipfile.BadZipFile) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code not in (408, 429) and error.code < 500:
+                raise
+            if attempt == 3:
+                raise
+            print(f"Download of {destination.name} interrupted; retry {attempt + 1}/3: {type(error).__name__}", flush=True)
+            time.sleep(attempt * 2)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def main() -> None:
