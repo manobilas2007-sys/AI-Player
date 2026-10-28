@@ -323,7 +323,7 @@ public class SurfaceMiningTests implements FabricGameTest {
         BlockPos stone=new BlockPos(4,2,2);c.setBlockState(stone,Blocks.STONE);
         a.gathering().start(ResourceGathering.Kind.STONE,1,true);
         c.runAtTick(40,()->{
-            c.assertFalse(a.gathering().active(),"Outdoor order was retained");
+            c.assertTrue(a.gathering().active(),"Outdoor manual order was discarded instead of looking for a cave");
             c.assertTrue(c.getWorld().getBlockState(c.getAbsolutePos(stone)).isOf(Blocks.STONE),"Outdoor stone was mined");
             c.assertTrue(a.getMainHandStack().getDamage()==0,"Pick was used outdoors");
             c.assertTrue(a.backpack.count(Items.COBBLESTONE)==0,"Invented outdoor resource");

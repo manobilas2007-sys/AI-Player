@@ -51,6 +51,7 @@ public final class FarmProject {
     private final CompanionEntity npc;
     private final ProjectWork work;
     private final ProjectMaterials materials;
+    private final dev.aiplayer.ai.ManualResourceSurvey waterSurvey;
     private final List<BlockPos> fields=new ArrayList<>();
     private final Set<Long> known=new HashSet<>();
     private final Map<Long,Item> cropSeeds=new HashMap<>();
@@ -67,6 +68,7 @@ public final class FarmProject {
 
     public FarmProject(CompanionEntity npc,ProjectWork work,ProjectMaterials materials){
         this.npc=npc;this.work=work;this.materials=materials;
+        waterSurvey=new dev.aiplayer.ai.ManualResourceSurvey(npc);
     }
     public boolean active(){return active;}
     public String status(){return status;}
@@ -92,7 +94,7 @@ public final class FarmProject {
             work.setBoundary(origin,CARE_RADIUS);status="Cuidar das plantações existentes até 100 blocos desta ordem";
         }
     }
-    public void pause(){work.pause();materials.pause();action=null;actionTicks=0;}
+    public void pause(){waterSurvey.pause();work.pause();materials.pause();action=null;actionTicks=0;}
     private void stationsOutsideFarm(){
         materials.preferWorkbench(anchor.add(-2,1,-3));
         materials.preferFurnace(anchor.add(-2,1,-1));
@@ -100,7 +102,7 @@ public final class FarmProject {
             anchor.getX()+SIZE,npc.getWorld().getTopY(),anchor.getZ()+SIZE));
     }
     public void cancel(){
-        active=false;phase=Phase.DONE;origin=null;anchor=null;fields.clear();known.clear();cropSeeds.clear();avoidedSources.clear();
+        waterSurvey.reset();active=false;phase=Phase.DONE;origin=null;anchor=null;fields.clear();known.clear();cropSeeds.clear();avoidedSources.clear();
         action=null;pendingHarvest=null;source=null;waterScanOrigin=null;cursor=0;completed=0;fieldCursor=0;
         actionTicks=0;scanRadius=0;scanEdge=0;waterRadius=0;waterEdge=0;waterY=0;nextScan=0;planted=0;
         sourceSince=0;sourceDistance=Double.MAX_VALUE;waterSearchLeg=0;basinCursor=0;basinPrepared=false;
@@ -386,8 +388,9 @@ public final class FarmProject {
             RaycastContext.FluidHandling.SOURCE_ONLY,npc));
         return hit.getType()==HitResult.Type.MISS || hit.getBlockPos().equals(pos);
     }
-    private void useSource(BlockPos pos){source=pos.toImmutable();sourceSince=npc.age;sourceDistance=Double.MAX_VALUE;}
+    private void useSource(BlockPos pos){waterSurvey.stop();source=pos.toImmutable();sourceSince=npc.age;sourceDistance=Double.MAX_VALUE;}
     private void findWater(ServerWorld world){
+        if(source!=null && !world.isChunkLoaded(source)){work.approach(source);return;}
         if(sourceAllowed(world,source))return;
         source=null;
         var remembered=npc.intelligence().memory().nearest("water",npc.getBlockPos(),world.getTime(),48);
@@ -402,19 +405,12 @@ public final class FarmProject {
             if(sourceAllowed(world,p) && visibleWater(world,p)){useSource(p);return;}
         }
         status="Procurar uma fonte natural de água carregada para encher o balde";
-        if(waterRadius>64){
-            int[][] directions={{24,0},{0,24},{-24,0},{0,-24},{36,36},{-36,36},{-36,-36},{36,-36}};
-            int[] direction=directions[waterSearchLeg%directions.length];
-            for(int dy:new int[]{0,1,-1,2,-2,3,-3}){
-                BlockPos destination=origin.add(direction[0],dy,direction[1]);
-                if(world.isChunkLoaded(destination) && WorkNavigation.safeWorkFooting(npc,destination)){
-                    if(work.moveTo(destination)){waterSearchLeg++;waterScanOrigin=null;}
-                    return;
-                }
-            }
-            waterSearchLeg++;waterScanOrigin=null;
+        if(waterRadius>32 || waterSurvey.active()){
+            waterSurvey.tick(false);
+            if(waterRadius>64){waterScanOrigin=null;waterRadius=0;}
         }
     }
+
     /** Prepare the whole dry channel first. Pouring into one completed cell
      * before excavating the next would let water enter an unpaid floor gap. */
     private boolean prepareBasins(ServerWorld world){
@@ -453,10 +449,10 @@ public final class FarmProject {
         }
         BlockPos pos=channels().get(cursor);
         if(stillWater(world,pos) && OwnedBlocks.get(world).owned(pos,npc.getUuid())){cursor++;return;}
-        if(!editAllowed(world,pos) || !world.getBlockState(pos.down()).isSolidBlock(world,pos.down())){
+        if(world.isChunkLoaded(pos) && (!editAllowed(world,pos) || !world.getBlockState(pos.down()).isSolidBlock(world,pos.down()))){
             basinPrepared=false;basinCursor=0;status="Conferir novamente o apoio do canal";return;
         }
-        if(!world.getBlockState(pos).isAir() && !world.getBlockState(pos).isOf(Blocks.WATER)){
+        if(world.isChunkLoaded(pos) && !world.getBlockState(pos).isAir() && !world.getBlockState(pos).isOf(Blocks.WATER)){
             basinPrepared=false;basinCursor=0;status="Preparar novamente o canal antes de buscar água";return;
         }
         if(materials.count(Items.WATER_BUCKET)==0){
@@ -546,6 +542,12 @@ public final class FarmProject {
         if(!dimension.equals(world.getRegistryKey().getValue().toString())){cancel();return;}
         if(npc.menuOpen() || npc.isEating() || npc.getTarget()!=null){pause();return;}
         if(!rules(world))return;
+        if(create && !materials.resumePending()){status=materials.status();return;}
+        boolean fetchingWater=create && phase==Phase.WATER && basinPrepared
+            && cursor<channels().size() && materials.count(Items.WATER_BUCKET)==0;
+        if(create && !fetchingWater && (!world.isChunkLoaded(anchor) || !world.isChunkLoaded(anchor.add(SIZE-1,0,SIZE-1)))){
+            status="Voltar à plantação para retomar o trabalho";work.approach(anchor);return;
+        }
         if(create)switch(phase){
             case SURVEY->survey(world);case CLEAR->clear(world);case FOUNDATION->foundation(world);
             case GROUND->ground(world);case WATER->water(world);case PLANT->finishPlanting(world);default->{ }
@@ -556,6 +558,7 @@ public final class FarmProject {
         n.putString("Dimension",dimension);n.putString("Phase",phase.name());n.putString("Status",status);
         if(origin!=null)n.putLong("Origin",origin.asLong());if(anchor!=null)n.putLong("Anchor",anchor.asLong());
         n.putInt("Cursor",cursor);n.putInt("Completed",completed);n.putInt("Planted",planted);
+        NbtCompound waterSearch=new NbtCompound();waterSurvey.writeNbt(waterSearch);n.put("WaterSurvey",waterSearch);
         n.putBoolean("BasinPrepared",basinPrepared);n.putInt("BasinCursor",basinCursor);
         n.putString("Border",Registries.ITEM.getId(border).toString());
         n.putLongArray("Fields",fields.stream().mapToLong(BlockPos::asLong).toArray());
@@ -574,10 +577,14 @@ public final class FarmProject {
         dimension=n.getString("Dimension");
         if(!dimension.equals(npc.getWorld().getRegistryKey().getValue().toString()))return;
         origin=BlockPos.fromLong(n.getLong("Origin"));anchor=n.contains("Anchor")?BlockPos.fromLong(n.getLong("Anchor")):origin.add(2,-1,0);
-        if(origin.getSquaredDistance(npc.getBlockPos())>128*128){origin=null;return;}
+        if(!npc.getWorld().getWorldBorder().contains(origin) || npc.getWorld().isOutOfHeightLimit(origin)
+                || !npc.getWorld().getWorldBorder().contains(anchor) || npc.getWorld().isOutOfHeightLimit(anchor)){
+            origin=null;return;
+        }
         create=n.getBoolean("Create");
         try{phase=Phase.valueOf(n.getString("Phase"));}catch(IllegalArgumentException bad){return;}
         cursor=Math.max(0,Math.min(SIZE*SIZE*3,n.getInt("Cursor")));completed=Math.max(0,n.getInt("Completed"));planted=Math.max(0,n.getInt("Planted"));
+        waterSurvey.readNbt(n.getCompound("WaterSurvey"));
         basinPrepared=n.getBoolean("BasinPrepared");basinCursor=Math.max(0,Math.min(channels().size(),n.getInt("BasinCursor")));
         Identifier id=Identifier.tryParse(n.getString("Border"));
         if(id!=null){

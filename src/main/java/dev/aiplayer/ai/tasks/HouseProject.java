@@ -52,15 +52,30 @@ public final class HouseProject {
         +" palette="+(palette==null?"none":palette.id())+" pos="+npc.getPos()+" work="+work.status();}
     public void start(BlockPos origin,Item preferredPlanks){
         cancel();
-        if(!(npc.getWorld() instanceof ServerWorld) || origin==null)return;
+        if(!(npc.getWorld() instanceof ServerWorld world) || origin==null)return;
         palette=preferredPlanks==null?choosePalette():HouseBlueprint.palette(preferredPlanks);
         if(palette==null){status="Não reconheci essa madeira para o abrigo";return;}
-        anchor=origin.add(2,0,0).toImmutable();
+        anchor=groundOrigin(world,origin).add(2,0,0).toImmutable();
         dimension=npc.getWorld().getRegistryKey().getValue().toString();
         active=true;phase=Phase.SURVEY;cursor=0;placed=0;
         materials.selectWood(palette.log(),palette.planks());
         reserveTerrain();
         status="Conferir terreno do abrigo de "+palette.id();
+    }
+    private BlockPos groundOrigin(ServerWorld world,BlockPos origin){
+        // A creative owner can give an order while flying. Resolve only the
+        // height below that original column; do not move the authorized X/Z
+        // or choose a different site when a structure/fluid blocks the column.
+        for(BlockPos pos=origin.down();pos.getY()>=world.getBottomY();pos=pos.down()){
+            if(!world.isChunkLoaded(pos) || !world.getWorldBorder().contains(pos)
+                    || !world.getFluidState(pos).isEmpty() || world.getBlockEntity(pos)!=null
+                    || protectedAt(world,pos))return origin;
+            BlockState state=world.getBlockState(pos);
+            if(state.isAir() || soft(state))continue;
+            if(state.isIn(BlockTags.LOGS) && naturalLog(world,pos))continue;
+            return state.isSolidBlock(world,pos) && terrain(world,pos,state)?pos.up():origin;
+        }
+        return origin;
     }
     private void reserveTerrain(){
         if(anchor!=null && npc.getWorld() instanceof ServerWorld world)
@@ -135,7 +150,8 @@ public final class HouseProject {
     }
     private boolean loaded(ServerWorld world,BlockPos pos){
         if(world.isChunkLoaded(pos))return true;
-        status="Aguardar terreno carregado para o abrigo";return false;
+        status="Voltar ao abrigo para retomar a obra";
+        work.approach(pos);return false;
     }
     private boolean checkClearCell(ServerWorld world,BlockPos pos){
         if(!loaded(world,pos))return false;
@@ -151,42 +167,30 @@ public final class HouseProject {
         }
         return true;
     }
-    private BlockPos foundationGap(ServerWorld world,BlockPos top){
-        BlockPos support=null;
+    private BlockPos foundationSupport(ServerWorld world,BlockPos top){
         for(int depth=0;depth<4;depth++){
             BlockPos pos=top.down(depth);
-            if(!loaded(world,pos))return top;
+            if(!loaded(world,pos))return null;
+            BlockState state=world.getBlockState(pos);
             if(protectedAt(world,pos) && !world.getBlockState(pos).isSolidBlock(world,pos)){
-                status="Preservar bloco protegido na fundação";return top;
+                status="Preservar bloco protegido na fundação";return null;
             }
             if(!world.getFluidState(pos).isEmpty() || world.getBlockEntity(pos)!=null){
-                status="A fundação precisa de terreno seco sem blocos de armazenamento";return top;
+                status="A fundação precisa de terreno seco sem blocos de armazenamento";return null;
             }
-            if(world.getBlockState(pos).isSolidBlock(world,pos)){support=pos;break;}
-            if(!world.getBlockState(pos).isAir()){
-                status="Obstáculo não removível na fundação";return top;
+            if(state.isSolidBlock(world,pos))return pos;
+            // Natural vegetation below the floor is preparation work, not
+            // an invalid site. It is physically removed before filling here.
+            if(!state.isAir() && !soft(state)){
+                status="Obstáculo não removível na fundação";return null;
             }
         }
-        if(support==null){status="Desnível maior que quatro blocos; preciso de outro ponto para o abrigo";return top;}
-        return support.equals(top)?null:support.up();
+        status="Desnível maior que quatro blocos; preciso de outro ponto para o abrigo";return null;
     }
     private void survey(ServerWorld world){
         for(BlockPos pos:HouseBlueprint.clearance(anchor))if(!checkClearCell(world,pos))return;
-        for(BlockPos top:HouseBlueprint.foundation(anchor)){
-            BlockPos gap=foundationGap(world,top);
-            if(gap!=null && (!world.getBlockState(gap).isAir() || gap.equals(top)
-                    && !hasFoundationSupport(world,top)))return;
-        }
+        for(BlockPos top:HouseBlueprint.foundation(anchor))if(foundationSupport(world,top)==null)return;
         phase=Phase.CLEAR;cursor=0;status="Preparar terreno: retirar neve, vegetação e desníveis naturais";
-    }
-    private boolean hasFoundationSupport(ServerWorld world,BlockPos top){
-        for(int depth=0;depth<4;depth++){
-            BlockPos pos=top.down(depth);
-            if(!world.isChunkLoaded(pos) || !world.getFluidState(pos).isEmpty() || world.getBlockEntity(pos)!=null)return false;
-            if(world.getBlockState(pos).isSolidBlock(world,pos))return true;
-            if(!world.getBlockState(pos).isAir())return false;
-        }
-        return false;
     }
     private void clear(ServerWorld world){
         List<BlockPos> cells=HouseBlueprint.clearance(anchor);
@@ -210,13 +214,15 @@ public final class HouseProject {
         while(cursor<tops.size()){
             BlockPos top=tops.get(cursor);
             if(!loaded(world,top))return;
-            if(world.getBlockState(top).isSolidBlock(world,top)){cursor++;continue;}
-            if(!hasFoundationSupport(world,top)){
-                status="Aguardar fundação seca e segura até quatro blocos abaixo";return;
+            BlockPos support=foundationSupport(world,top);
+            if(support==null)return;
+            if(support.equals(top)){cursor++;continue;}
+            BlockPos gap=support.up();
+            if(protectedAt(world,gap))return;
+            if(!world.getBlockState(gap).isAir()){
+                status="Retirar vegetação e neve sob a fundação";
+                work.clearNatural(gap);return;
             }
-            BlockPos gap=foundationGap(world,top);
-            if(gap==null){cursor++;continue;}
-            if(!world.getBlockState(gap).isAir() || protectedAt(world,gap))return;
             if(!materials.ensure(Items.COBBLESTONE,1)){status=materials.status();return;}
             status="Firmar fundação real do abrigo";
             work.place(gap,Blocks.COBBLESTONE.getDefaultState(),Items.COBBLESTONE,1);return;
@@ -224,7 +230,7 @@ public final class HouseProject {
         phase=Phase.BUILD;cursor=0;status="Construir abrigo com uma única madeira";
     }
     private boolean matches(ServerWorld world,HouseBlueprint.Part part){
-        if(!own(world,part.position()))return false;
+        if(!world.isChunkLoaded(part.position()) || !own(world,part.position()))return false;
         BlockState actual=world.getBlockState(part.position());
         if(!actual.isOf(part.state().getBlock()))return false;
         if(actual.getBlock() instanceof net.minecraft.block.StairsBlock
@@ -285,6 +291,9 @@ public final class HouseProject {
         if(!world.getGameRules().getBoolean(GameRules.DO_MOB_GRIEFING) || !world.getGameRules().getBoolean(GameRules.DO_TILE_DROPS)){
             status="As regras do mundo impedem construir e recolher materiais";return;
         }
+        // Keep a material trip in charge until its real prerequisite exists.
+        // Only then may inspecting an unloaded site route the NPC back home.
+        if(!materials.resumePending()){status=materials.status();return;}
         switch(phase){case SURVEY->survey(world);case CLEAR->clear(world);case FOUNDATION->foundations(world);
             case BUILD->build(world);case EXIT->exit(world);case DONE->{active=false;}}
     }
@@ -303,7 +312,9 @@ public final class HouseProject {
         if(!dimension.equals(npc.getWorld().getRegistryKey().getValue().toString()))return;
         palette=HouseBlueprint.palette(n.getString("Wood"));if(palette==null || !n.contains("Anchor"))return;
         anchor=BlockPos.fromLong(n.getLong("Anchor"));
-        if(anchor.getSquaredDistance(npc.getBlockPos())>128*128){status="Abrigo distante; aguardar nova ordem";return;}
+        if(!npc.getWorld().getWorldBorder().contains(anchor) || npc.getWorld().isOutOfHeightLimit(anchor)){
+            status="Abrigo fora da área válida";return;
+        }
         try{phase=Phase.valueOf(n.getString("Phase"));}catch(IllegalArgumentException invalid){return;}
         cursor=Math.max(0,Math.min(512,n.getInt("Index")));placed=Math.max(0,Math.min(512,n.getInt("Placed")));
         status=n.getString("Status");active=phase!=Phase.DONE;

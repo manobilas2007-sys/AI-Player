@@ -42,6 +42,7 @@ public class AIPlayer implements ModInitializer {
             .min(Comparator.comparingDouble(player::squaredDistanceTo)).orElse(null);
     }
     @Override public void onInitialize() {
+        dev.aiplayer.ai.navigation.CompanionChunkLoading.initialize();
         net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.AFTER.register((world,player,pos,state,blockEntity)->{
             if(world instanceof net.minecraft.server.world.ServerWorld server)dev.aiplayer.ai.OwnedBlocks.get(server).playerBroke(pos);
         });

@@ -61,6 +61,8 @@ public final class CompanionTasks {
     private String dimension="", status="Sem projeto";
     private int index, actionTicks, nextRoute, retryAt, routeFailures, explored;
     private int materialRetryAt, exploreRetryAt, harvestSince, routeSince;
+    private String observedStatus="";
+    private int statusSince,nextStatusNotice;
     private boolean gatheringWood, builderPositioned;
     private Item plankSource;
     private final List<BlockPos> fields=new ArrayList<>();
@@ -118,6 +120,17 @@ public final class CompanionTasks {
         kind=Kind.NONE;anchor=null;fields.clear();actionTarget=null;pendingHarvest=null;actionTicks=0;plankSource=null;
         routeTarget=null;routeAction=null;routePosition=null;routePoint=null;builderPositioned=false;
         index=0;explored=0;routeFailures=0;status="Projeto cancelado";
+        observedStatus="";statusSince=npc.age;nextStatusNotice=npc.age;
+    }
+    private void reportStationaryStage(){
+        if(kind!=Kind.BUILD_HOUSE && kind!=Kind.CREATE_FARM)return;
+        String current=status();
+        if(!current.equals(observedStatus)){
+            observedStatus=current;statusSince=npc.age;return;
+        }
+        if(npc.age-statusSince<200 || npc.age<nextStatusNotice || npc.owner()==null)return;
+        npc.owner().sendMessage(net.minecraft.text.Text.literal("[AI Player] Etapa atual: "+current+"."),false);
+        nextStatusNotice=npc.age+1200;
     }
     public void pause(){
         if(advancedActive()){house.pause();farmProject.pause();materials.pause();projectWork.pause();}
@@ -134,6 +147,7 @@ public final class CompanionTasks {
             Kind executing=kind;
             if(kind==Kind.BUILD_HOUSE)house.tick();else farmProject.tick();
             status=status();
+            reportStationaryStage();
             if(!(executing==Kind.BUILD_HOUSE?house.active():farmProject.active())){
                 kind=Kind.NONE;projectWork.pause();
                 npc.intelligence().memory().succeeded(status);
@@ -599,7 +613,10 @@ public final class CompanionTasks {
             kind=Kind.NONE;status="Projeto não restaurado nesta dimensão";return;
         }
         anchor=BlockPos.fromLong(n.getLong("Anchor"));
-        if(anchor.getSquaredDistance(npc.getBlockPos())>(advancedActive()?128*128:48*48)){kind=Kind.NONE;status="Projeto distante; aguardar nova ordem";return;}
+        if(!npc.getWorld().getWorldBorder().contains(anchor) || npc.getWorld().isOutOfHeightLimit(anchor)
+                || (!advancedActive() && anchor.getSquaredDistance(npc.getBlockPos())>48*48)){
+            kind=Kind.NONE;status="Projeto fora da área válida";return;
+        }
         if(advancedActive()){
             materials.readNbt(root);house.readNbt(root);farmProject.readNbt(root);
             if(!(kind==Kind.BUILD_HOUSE?house.active():farmProject.active()))kind=Kind.NONE;

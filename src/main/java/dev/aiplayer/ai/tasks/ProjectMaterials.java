@@ -54,6 +54,23 @@ public final class ProjectMaterials {
     private boolean preparingAxe,axePending,woodReceived;
     private double bestTargetDistance=Double.MAX_VALUE;
     private final Map<UUID,Integer> avoidedDrops=new HashMap<>();
+    /** Each ingredient keeps its own expanding walk, so a nested tool recipe
+     * cannot send the parent ore search back around the same eight offsets. */
+    private final Map<Item,Survey> surveys=new HashMap<>();
+    private record Supply(Item item,int amount) {}
+    private final Map<Item,Supply> smeltSupplies=new HashMap<>();
+    private Item pendingItem;
+    private int pendingAmount;
+    private static final class Survey {
+        int direction,legLength=1,remaining=1,turns,lastTick=-1,since;
+        BlockPos waypoint;
+        double best=Double.MAX_VALUE;
+        boolean active;
+        void nextLegStep(){
+            waypoint=null;best=Double.MAX_VALUE;
+            if(--remaining<=0){direction=(direction+1)%4;if(++turns%2==0)legLength++;remaining=legLength;}
+        }
+    }
     private UUID dropTarget;
     private int dropProgressAt;
     private double bestDropDistance=Double.MAX_VALUE;
@@ -128,12 +145,27 @@ public final class ProjectMaterials {
         bestTargetDistance=Double.MAX_VALUE;dropProgressAt=0;
         dropTarget=null;dropFor=null;bestDropDistance=Double.MAX_VALUE;avoidedDrops.clear();lastEnsure=-1;
         woodHarvests=0;preparingAxe=false;axePending=false;woodReceived=false;
+        surveys.clear();
+        smeltSupplies.clear();
+        pendingItem=null;pendingAmount=0;
         status="Conferir materiais do projeto";
     }
 
     /** Advance at most one dependency leaf per call. True always means actual
      * inventory already contains the requested quantity, including the hand. */
     public boolean ensure(Item item,int amount){
+        if(amount<=0)return true;
+        if(item==null || item==Items.AIR || amount>2048){status="Material inválido para o projeto";return false;}
+        pendingItem=item;pendingAmount=amount;
+        boolean ready=ensureRequested(item,amount);
+        if(ready){pendingItem=null;pendingAmount=0;}
+        return ready;
+    }
+    /** Finish the current material trip before the project asks to return to
+     * its unloaded worksite. Internal prerequisites never replace this request. */
+    public boolean resumePending(){return pendingItem==null || ensure(pendingItem,pendingAmount);}
+    public boolean hasPending(){return pendingItem!=null;}
+    private boolean ensureRequested(Item item,int amount){
         if(amount<=0)return true;
         if(item==null || item==Items.AIR || amount>2048){status="Material inválido para o projeto";return false;}
         if(!(npc.getWorld() instanceof ServerWorld world) || !world.getServer().isOnThread())return false;
@@ -265,6 +297,9 @@ public final class ProjectMaterials {
         return pos!=null && world.isChunkLoaded(pos) && mining.reachable(pos);
     }
     private boolean workbench(ServerWorld world,int depth){
+        if(bench!=null && !world.isChunkLoaded(bench)){
+            status="Voltar à bancada conhecida do projeto";work.approach(bench);return false;
+        }
         if(bench!=null && world.isChunkLoaded(bench) && world.getBlockState(bench).isOf(Blocks.CRAFTING_TABLE)){
             status="Usar bancada do projeto";return work.approach(bench);
         }
@@ -294,7 +329,8 @@ public final class ProjectMaterials {
         return null;
     }
     private boolean clearStation(ServerWorld world,BlockPos spot){
-        if(!world.isChunkLoaded(spot) || work.protectedPosition(spot)){
+        if(!world.isChunkLoaded(spot)){status="Voltar ao local da estação do projeto";work.approach(spot);return false;}
+        if(work.protectedPosition(spot)){
             status="Preservar local protegido da estação de trabalho";return false;
         }
         if(world.getBlockState(spot).isAir())return true;
@@ -306,6 +342,9 @@ public final class ProjectMaterials {
         return false;
     }
     private FurnaceBlockEntity furnace(ServerWorld world,int depth){
+        if(furnace!=null && !world.isChunkLoaded(furnace)){
+            status="Voltar à fornalha conhecida do projeto";work.approach(furnace);return null;
+        }
         if(preferredFurnace!=null && world.isChunkLoaded(preferredFurnace)
                 && world.getBlockEntity(preferredFurnace) instanceof FurnaceBlockEntity
                 && OwnedBlocks.get(world).owned(preferredFurnace,npc.getUuid()))furnace=preferredFurnace;
@@ -322,6 +361,11 @@ public final class ProjectMaterials {
     }
     private boolean smelt(ServerWorld world,Item output,int amount,int depth){
         smelting=output;
+        // Continue the actual outstanding ingredient before returning to a
+        // station whose chunk has since unloaded. Otherwise its old location
+        // becomes a leash each time a gathering trip leaves the ticket area.
+        Supply outstanding=smeltSupplies.get(output);
+        if(outstanding!=null && !smeltSupply(world,output,outstanding.item(),outstanding.amount(),depth+1))return false;
         FurnaceBlockEntity oven=furnace(world,depth+1);
         if(oven==null)return false;
         if(!world.getGameRules().getBoolean(GameRules.DO_MOB_GRIEFING)){
@@ -342,7 +386,7 @@ public final class ProjectMaterials {
         if(!input.isEmpty()){
             if(fuel.isEmpty() && burning<=0){
                 Item available=fuelAvailable(input.isOf(log));
-                if(available==null){if(!ensure(world,planks,1,depth+1))return false;available=planks;}
+                if(available==null){if(!smeltSupply(world,output,planks,1,depth+1))return false;available=planks;}
                 status="Levar combustível real até a fornalha";
                 if(!work.approach(furnace))return false;
                 if(consume(available,1)){oven.setStack(1,new ItemStack(available));oven.markDirty();}
@@ -356,11 +400,11 @@ public final class ProjectMaterials {
         // fuel's burn time while the worker travelled to the quarry again.
         int batch=Math.min(raw.getMaxCount(),Math.max(1,amount-count(output)));
         if(raw==Items.RED_SAND)batch=Math.min(batch,count(raw));
-        if(!ensure(world,raw,batch,depth+1))return false;
+        if(!smeltSupply(world,output,raw,batch,depth+1))return false;
         Item available=fuelAvailable(output==Items.CHARCOAL);
         if(fuel.isEmpty() && burning<201 && available==null){
-            if(output==Items.CHARCOAL){if(!ensure(world,planks,1,depth+1))return false;available=planks;}
-            else {if(!ensure(world,Items.CHARCOAL,1,depth+1))return false;available=Items.CHARCOAL;}
+            if(output==Items.CHARCOAL){if(!smeltSupply(world,output,planks,1,depth+1))return false;available=planks;}
+            else {if(!smeltSupply(world,output,Items.CHARCOAL,1,depth+1))return false;available=Items.CHARCOAL;}
         }
         // Obtain raw material and fuel before owning a route to the oven.
         // Re-approaching it on every gather tick kept the worker within reach
@@ -372,6 +416,11 @@ public final class ProjectMaterials {
         if(fuel.isEmpty() && burning<201 && available!=null && consume(available,1))oven.setStack(1,new ItemStack(available));
         if(consume(raw,batch)){oven.setStack(0,new ItemStack(raw,batch));oven.markDirty();npc.animateInteraction(CompanionEntity.CRAFT,6);}
         status="Fundir "+label(raw)+" na fornalha";return false;
+    }
+    private boolean smeltSupply(ServerWorld world,Item output,Item ingredient,int amount,int depth){
+        smeltSupplies.put(output,new Supply(ingredient,amount));
+        if(!ensure(world,ingredient,amount,depth))return false;
+        smeltSupplies.remove(output);return true;
     }
     private Item fuelAvailable(boolean charcoal){
         if(count(Items.COAL)>0)return Items.COAL;
@@ -487,6 +536,7 @@ public final class ProjectMaterials {
         // new wall obscures it. Physical approach/mining still require sight.
         if(target!=null && (miningFor!=item || !safeTarget(world,target,item,false))){target=null;mining.reset();}
         if(target!=null){
+            Survey survey=surveys.get(item);if(survey!=null){survey.active=false;survey.waypoint=null;}
             status="Obter "+label(item)+" em bloco natural acessível";
             double distance=npc.squaredDistanceTo(Vec3d.ofCenter(target));
             // Smelting, crafting, menus and other dependencies may suspend a
@@ -504,13 +554,15 @@ public final class ProjectMaterials {
             return false;
         }
         if(npc.age<searchAt)return false;
+        Survey survey=surveys.get(item);
+        if(survey!=null && survey.active)surveyStep(world,item);
         if(scanFor!=item || scanOrigin==null || scanOrigin.getSquaredDistance(npc.getBlockPos())>8*8){
             scanFor=item;scanOrigin=npc.getBlockPos().toImmutable();scanRadius=0;scanY=0;scanEdge=0;
         }
         for(int i=0;i<SCAN_PER_TICK;i++){
             if(scanRadius>SEARCH_RADIUS){
                 scans++;scanRadius=0;scanY=0;scanEdge=0;searchAt=npc.age+40;
-                status="Procurar "+label(item)+" exposto em terreno carregado";
+                status="Explorar novos trechos para encontrar "+label(item);
                 surveyStep(world,item);return false;
             }
             int radius=scanRadius,edge=scanEdge;
@@ -542,15 +594,40 @@ public final class ProjectMaterials {
         return false;
     }
     private void surveyStep(ServerWorld world,Item item){
-        int[][] offsets={{12,0},{0,12},{-12,0},{0,-12},{18,18},{-18,18},{-18,-18},{18,-18}};
-        int[] offset=offsets[(scans-1)%offsets.length];
-        for(int dy=2;dy>=-3;dy--){
-            BlockPos feet=scanOrigin.add(offset[0],dy,offset[1]);
-            if(world.isChunkLoaded(feet) && WorkNavigation.safeWorkFooting(npc,feet)
-                    && world.isSpaceEmpty(npc,new Box(feet).stretch(0,0.8,0))){
-                work.moveTo(feet);status="Procurar caminho para novos materiais do projeto";return;
+        Survey survey=surveys.computeIfAbsent(item,key->new Survey());survey.active=true;
+        if(survey.waypoint!=null){
+            double distance=npc.squaredDistanceTo(Vec3d.ofBottomCenter(survey.waypoint));
+            if(npc.age-survey.lastTick>1){survey.since=npc.age;survey.best=distance;}
+            survey.lastTick=npc.age;
+            if(distance<survey.best-0.2){survey.best=distance;survey.since=npc.age;}
+            if(work.moveTo(survey.waypoint))survey.nextLegStep();
+            else if(npc.age-survey.since>160){
+                npc.intelligence().memory().failed(survey.waypoint,world.getTime());survey.nextLegStep();
+            }else return;
+        }
+        // The square walk increases its leg after every second turn. There is
+        // no radius tied to the owner or worksite; only this local segment is
+        // inspected, and moving NPC chunk tickets supply the next frontier.
+        int[][] directions={{1,0},{0,1},{-1,0},{0,-1}};
+        int[] direction=directions[survey.direction];
+        for(int distance:new int[]{24,16,8})for(int side:new int[]{0,3,-3,6,-6}){
+            BlockPos column=npc.getBlockPos().add(direction[0]*distance-direction[1]*side,0,
+                direction[1]*distance+direction[0]*side);
+            for(int dy:new int[]{0,1,-1,2,-2,3,-3,4,-4,5,-5,6,-6}){
+                BlockPos feet=column.up(dy);
+                if(world.isChunkLoaded(feet) && world.getWorldBorder().contains(feet)
+                        && !npc.intelligence().memory().blocked(feet,world.getTime())
+                        && WorkNavigation.safeWorkFooting(npc,feet)
+                        && world.isSpaceEmpty(npc,new Box(feet).stretch(0,0.8,0))){
+                    survey.waypoint=feet.toImmutable();survey.since=npc.age;survey.lastTick=npc.age;
+                    survey.best=npc.squaredDistanceTo(Vec3d.ofBottomCenter(feet));
+                    work.moveTo(feet);status="Explorar novos caminhos para obter "+label(item);return;
+                }
             }
         }
+        // An unsafe cliff or unloaded frontier must not hold one heading
+        // forever. Try the next side using only physically navigable terrain.
+        survey.nextLegStep();searchAt=npc.age+10;
     }
     public void writeNbt(NbtCompound root){
         NbtCompound n=new NbtCompound();n.putString("Dimension",dimension);
@@ -558,6 +635,21 @@ public final class ProjectMaterials {
         n.putInt("WoodHarvests",woodHarvests);
         n.putBoolean("AxePending",axePending);
         n.putBoolean("WoodReceived",woodReceived);
+        if(pendingItem!=null){n.putString("PendingItem",itemId(pendingItem));n.putInt("PendingAmount",pendingAmount);}
+        NbtCompound search=new NbtCompound();
+        for(var entry:surveys.entrySet()){
+            Survey survey=entry.getValue();NbtCompound saved=new NbtCompound();
+            saved.putInt("Direction",survey.direction);saved.putInt("Leg",survey.legLength);
+            saved.putInt("Remaining",survey.remaining);saved.putInt("Turns",survey.turns%2);
+            saved.putBoolean("Active",survey.active);search.put(itemId(entry.getKey()),saved);
+        }
+        n.put("Surveys",search);
+        NbtCompound supplies=new NbtCompound();
+        for(var entry:smeltSupplies.entrySet()){
+            NbtCompound saved=new NbtCompound();saved.putString("Item",itemId(entry.getValue().item()));
+            saved.putInt("Amount",entry.getValue().amount());supplies.put(itemId(entry.getKey()),saved);
+        }
+        n.put("SmeltSupplies",supplies);
         if(furnace!=null)n.putLong("Furnace",furnace.asLong());if(bench!=null)n.putLong("Bench",bench.asLong());
         if(preferredFurnace!=null)n.putLong("PreferredFurnace",preferredFurnace.asLong());
         if(preferredBench!=null)n.putLong("PreferredBench",preferredBench.asLong());
@@ -574,6 +666,29 @@ public final class ProjectMaterials {
         Identifier l=Identifier.tryParse(n.getString("Log")),p=Identifier.tryParse(n.getString("Planks"));
         if(l!=null && p!=null)selectWood(Registries.ITEM.get(l),Registries.ITEM.get(p));
         if(!dimension.equals(npc.getWorld().getRegistryKey().getValue().toString())){dimension="";return;}
+        Identifier requested=Identifier.tryParse(n.getString("PendingItem"));
+        if(requested!=null && Registries.ITEM.get(requested)!=Items.AIR
+                && n.getInt("PendingAmount")>0 && n.getInt("PendingAmount")<=2048){
+            pendingItem=Registries.ITEM.get(requested);pendingAmount=n.getInt("PendingAmount");
+        }
+        NbtCompound search=n.getCompound("Surveys");
+        for(Item item:new Item[]{log,Items.COBBLESTONE,Items.SAND,Items.COAL,Items.RAW_IRON,Items.DIRT}){
+            if(!search.contains(itemId(item)))continue;
+            NbtCompound saved=search.getCompound(itemId(item));Survey survey=new Survey();
+            survey.direction=Math.floorMod(saved.getInt("Direction"),4);
+            survey.legLength=Math.max(1,Math.min(1000000,saved.getInt("Leg")));
+            survey.remaining=Math.max(1,Math.min(survey.legLength,saved.getInt("Remaining")));
+            survey.turns=Math.floorMod(saved.getInt("Turns"),2);survey.active=saved.getBoolean("Active");surveys.put(item,survey);
+        }
+        NbtCompound supplies=n.getCompound("SmeltSupplies");
+        for(Item output:new Item[]{Items.IRON_INGOT,Items.GLASS,Items.CHARCOAL}){
+            NbtCompound saved=supplies.getCompound(itemId(output));Identifier id=Identifier.tryParse(saved.getString("Item"));
+            if(id==null)continue;
+            Item ingredient=Registries.ITEM.get(id);int amount=saved.getInt("Amount");
+            if((ingredient==Items.RAW_IRON || ingredient==Items.SAND || ingredient==Items.RED_SAND
+                    || ingredient==log || ingredient==planks || ingredient==Items.CHARCOAL) && amount>0 && amount<=64)
+                smeltSupplies.put(output,new Supply(ingredient,amount));
+        }
         if(n.contains("Furnace"))furnace=BlockPos.fromLong(n.getLong("Furnace"));
         if(n.contains("Bench"))bench=BlockPos.fromLong(n.getLong("Bench"));
         if(n.contains("PreferredFurnace"))preferredFurnace=BlockPos.fromLong(n.getLong("PreferredFurnace"));

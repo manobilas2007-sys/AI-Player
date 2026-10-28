@@ -1,4 +1,4 @@
-# AI Player 0.6.1-dev: Baritone, diálogos e projetos físicos
+# AI Player 0.6.2-dev: Baritone, diálogos e projetos físicos
 
 ## Arquitetura
 
@@ -55,7 +55,7 @@ Essa matriz distingue a funcionalidade adaptada de uma portabilidade integral
 de todos os arquivos e processos do cliente Baritone. Copiar classes de
 cliente sem um executor de NPC não tornaria essas capacidades funcionais.
 
-O planejador atual considera terreno carregado e rotas locais limitadas. A
+O planejador considera segmentos de terreno carregado. Tickets móveis do próprio NPC carregam a região seguinte e mantêm entidades e fornalhas ativas durante viagens. Não há raio total ligado à posição do dono para as ordens de busca. A
 configuração do adaptador limita a busca a 4.096 nós por chamada e 48 blocos
 de deslocamento por eixo, com orçamento agregado por NPC a cada tick. Um
 resultado parcial não é tratado como chegada ao destino. Não há importação
@@ -104,8 +104,7 @@ usam uma bancada acessível. Ferro, vidro e carvão vegetal são processados por
 uma fornalha vanilla colocada no mundo; combustível e tempo de cozimento são
 reais. Mineração produz drops no bloco e exige aproximação para recolher.
 
-A busca usa terreno carregado e recursos expostos e visíveis, com rotas locais
-segmentadas. O executor procura madeira da espécie escolhida, pedra, areia,
+A busca usa recursos expostos e visíveis, com rotas locais segmentadas. O NPC carrega a região ao redor enquanto caminha e amplia a procura quando não encontra o material perto; não carrega um destino distante inteiro de uma vez. O executor procura madeira da espécie escolhida, pedra, areia,
 carvão e ferro; não realiza escavação ilimitada até minério oculto. Quando um
 recurso ou rota não está acessível, mantém a necessidade no status. Não cria
 sementes, materiais, água ou ferramentas para completar uma tarefa.

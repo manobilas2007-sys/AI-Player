@@ -44,7 +44,7 @@ public final class ProjectWork {
     public String diagnostics(){
         Path path=npc.getNavigation().getCurrentPath();
         String sight="none";
-        if(goal!=null){
+        if(goal!=null && allowed(goal) && npc.squaredDistanceTo(Vec3d.ofCenter(goal))<=48*48){
             var hit=npc.getWorld().raycast(new RaycastContext(npc.getEyePos(),Vec3d.ofCenter(goal),
                 RaycastContext.ShapeType.COLLIDER,RaycastContext.FluidHandling.NONE,npc));
             sight=hit.getType()==HitResult.Type.MISS?"clear":hit.getBlockPos().toShortString();
@@ -60,10 +60,13 @@ public final class ProjectWork {
     public void pause(){mining.reset();placement=null;placeTicks=0;resetRoute();npc.clearWorkingVisual();}
     public void cancel(){pause();boundary=null;radius=0;nextRoute=0;status="Trabalho cancelado";}
     private ServerWorld world(){return npc.getWorld() instanceof ServerWorld server?server:null;}
-    private boolean allowed(BlockPos pos){
+    private boolean validDestination(BlockPos pos){
         ServerWorld world=world();
         return world!=null && pos.getY()>=world.getBottomY() && pos.getY()<world.getTopY()-2
-            && world.isChunkLoaded(pos) && insideBoundary(pos);
+            && world.getWorldBorder().contains(pos) && insideBoundary(pos);
+    }
+    private boolean allowed(BlockPos pos){
+        return validDestination(pos) && world().isChunkLoaded(pos);
     }
     private boolean insideBoundary(BlockPos pos){
         if(boundary==null)return true;
@@ -171,7 +174,10 @@ public final class ProjectWork {
         return true;
     }
     public boolean approach(BlockPos target){
-        if(!allowed(target)){status="Aguardar alvo carregado dentro da área autorizada";return false;}
+        if(!validDestination(target)){status="Alvo fora da área autorizada";return false;}
+        // A remembered station/site may be outside the currently loaded area.
+        // Travel through local terrain; only inspect/interact with it on arrival.
+        if(!allowed(target)){moveTo(target);return false;}
         if(!npc.getBoundingBox().intersects(new Box(target)) && inReach(target,npc.getEyePos())){
             resetRoute();return true;
         }
@@ -194,7 +200,7 @@ public final class ProjectWork {
     /** Routes in local loaded segments. The result means actual arrival at the
      * requested feet cell, never successful calculation of an intermediate path. */
     public boolean moveTo(BlockPos destination){
-        if(!allowed(destination)){status="Destino descarregado ou fora da área autorizada";return false;}
+        if(!validDestination(destination)){status="Destino fora da área autorizada";return false;}
         if(Math.abs(npc.getY()-destination.getY())<0.25
                 && npc.squaredDistanceTo(Vec3d.ofBottomCenter(destination))<0.65){resetRoute();return true;}
         // Navigation can finish within the requested cell while its fractional

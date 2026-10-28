@@ -20,7 +20,12 @@
       "dev.aiplayer.test.ProjectMaterialsTests",
       "dev.aiplayer.test.ProjectWorkTests",
       "dev.aiplayer.test.ProjectBootstrapTests",
-      "dev.aiplayer.test.ProjectArbitrationTests"
+      "dev.aiplayer.test.ProjectArbitrationTests",
+      "dev.aiplayer.test.RemoteProjectTests",
+      "dev.aiplayer.test.CompanionChunkLoadingTests",
+      "dev.aiplayer.test.LongRangeResourceTests",
+      "dev.aiplayer.test.HouseNaturalTerrainTests",
+      "dev.aiplayer.test.ManualResourceSurveyTests"
     ]
   },
   "depends": {
