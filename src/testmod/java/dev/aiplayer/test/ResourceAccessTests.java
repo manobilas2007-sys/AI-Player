@@ -166,7 +166,9 @@ public final class ResourceAccessTests implements FabricGameTest {
             if(x!=5 && x!=6)c.setBlockState(new BlockPos(x,3,z),Blocks.STONE);
         }
         c.setBlockState(new BlockPos(3,4,4),Blocks.DIRT);c.setBlockState(new BlockPos(2,4,4),Blocks.DIRT);
-        CompanionEntity npc=worker(c,new BlockPos(3,4,5));
+        // Pickup can leave the worker on its remaining source of soil. Start
+        // there deliberately so leaving that perch is tested every run.
+        CompanionEntity npc=worker(c,new BlockPos(3,5,4));
         NbtCompound saved=new NbtCompound();npc.writeCustomDataToNbt(saved);saved.putUuid("Owner",java.util.UUID.randomUUID());npc.readCustomDataFromNbt(saved);npc.setMode(Mode.WAIT);
         BlockPos goal=c.getAbsolutePos(new BlockPos(9,4,5));
         PreparedRoute route=new PreparedRoute(npc,p->Math.abs(p.getZ()-goal.getZ())<=2 && p.getY()>=goal.getY()-2);
@@ -187,6 +189,26 @@ public final class ResourceAccessTests implements FabricGameTest {
         c.runAtTick(550,()->{NbtCompound state=new NbtCompound();npc.crafting().writeNbt(state);
             c.assertTrue(state.getLongArray("DeferredOwnedBenches").length==1,"Unreachable bench was not deferred after bounded retries");
             c.assertTrue(c.getWorld().getBlockState(bench).isOf(Blocks.CRAFTING_TABLE),"Unreachable bench was removed remotely");c.complete();
+        });
+    }
+
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="resource_access",tickLimit=3800)
+    public void buriedIronCraftsStonePickFromItsOwnUndergroundStoneDependency(TestContext c){
+        for(int x=0;x<48;x++)for(int z=0;z<32;z++)for(int y=0;y<=8;y++)
+            c.setBlockState(new BlockPos(x,y,z),y>=6?Blocks.DIRT:y==5 && x>=20?Blocks.IRON_ORE:Blocks.STONE);
+        CompanionEntity npc=worker(c,new BlockPos(12,9,12));npc.equipStack(EquipmentSlot.MAINHAND,new ItemStack(Items.WOODEN_PICKAXE));
+        npc.backpack.setStack(0,new ItemStack(Items.OAK_LOG,4));
+        NbtCompound saved=new NbtCompound();npc.writeCustomDataToNbt(saved);saved.putUuid("Owner",java.util.UUID.randomUUID());npc.readCustomDataFromNbt(saved);npc.setMode(Mode.WAIT);
+        ProjectMaterials materials=new ProjectMaterials(npc,new ProjectWork(npc));boolean[] done={false},stoneCollected={false};
+        c.runAtEveryTick(()->{
+            if(materials.count(Items.COBBLESTONE)>=3)stoneCollected[0]=true;
+            if(!done[0])done[0]=materials.ensure(Items.RAW_IRON,1);
+        });
+        c.runAtTick(3680,()->{
+            c.assertTrue(done[0] && stoneCollected[0] && materials.count(Items.RAW_IRON)==1 && materials.count(Items.STONE_PICKAXE)==1,
+                "Iron request cancelled its own underground tool prerequisite: "+materials.status()+" "+materials.diagnostics());
+            c.assertTrue(materials.count(Items.COBBLESTONE)==0,"Stone pick did not consume its three real cobblestones");
+            c.assertFalse(npc.intelligence().restoration().pending(),"Tool/ore subtrips did not complete restoration");c.complete();
         });
     }
 
