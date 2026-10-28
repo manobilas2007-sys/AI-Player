@@ -1,6 +1,8 @@
-# AI Player v0.6.1-dev — diálogos, abrigo e agricultura
+# AI Player v0.6.2-dev — diálogos, abrigo e agricultura
 
 Minecraft Java **1.20.1**, Fabric, Java 17 e Gradle Wrapper 8.7.
+
+A versão 0.6.2 prepara grama e neve também sob a fundação em terrenos desnivelados. O NPC mantém chunks ao seu redor enquanto trabalha, avança em busca de recursos distantes e conserva o projeto quando está longe da obra.
 
 Converse com seu NPC pelo chat normal. O interpretador local aceita sinônimos, acentos e pequenos erros de escrita; não precisa de chave de API nem serviço de IA externo.
 
@@ -30,7 +32,9 @@ Responda **“sim”** ou **“pode começar”** para autorizar a proposta; **�
 
 O abrigo possui piso de 5×7, madeira consistente, janelas de vidro, porta, telhado com escadas e lajes, bancada e fornalha. Preparação do terreno remove vegetação e neve fisicamente e permite cortes e fundações naturais limitados; construções protegidas, inventários e blocos de outros NPCs são preservados. Terreno com lava, água, grandes desníveis ou sem apoio exige outro local seguro.
 
-Todos os blocos e ingredientes são reais. A busca de materiais preserva o solo reservado à própria obra, e todo o canal de irrigação precisa estar preparado antes de receber água. Ao trocar de projeto, o NPC prepara estações de trabalho locais. O planejador pode procurar madeira da espécie selecionada, pedra, areia, ferro e combustível em terreno carregado e acessível, fabricar componentes e usar uma fornalha vanilla. O ferro do balde e o vidro precisam ser obtidos e processados; nenhuma tarefa cria materiais ou sementes gratuitamente. Sem uma rota ou recurso acessível, o status explica a necessidade pendente.
+Todos os blocos e ingredientes são reais. A busca de materiais preserva o solo reservado à própria obra, e todo o canal de irrigação precisa estar preparado antes de receber água. Ao trocar de projeto, o NPC prepara estações de trabalho locais. O planejador pode procurar madeira da espécie selecionada, pedra, areia, ferro e combustível em terreno acessível que vai sendo carregado ao caminhar, fabricar componentes e usar uma fornalha vanilla. O ferro do balde e o vidro precisam ser obtidos e processados; nenhuma tarefa cria materiais ou sementes gratuitamente. Sem uma rota ou recurso acessível, o status explica a necessidade pendente.
+
+As ordens diretas de madeira, comida e pedra podem buscar recursos além da área do jogador. A busca de pedra procura acesso físico a uma caverna. O NPC mantém uma região móvel de chunks enquanto trabalha, incluindo a atualização de entidades e fornalhas; ao cancelar ou remover o NPC, seus tickets são liberados. Trabalhos salvos podem retomar no último chunk após reabrir o mundo. Crescimento aleatório de plantas continua seguindo as regras vanilla.
 
 A exploração passou a fazer parte da observação e das caminhadas curtas da autonomia. As tarefas novas não precisam dos antigos comandos de construir, plantar ou explorar. As ordens anteriores de madeira, pedra e comida continuam disponíveis no chat. Projetos antigos de 0.5.x continuam legíveis para que obras já salvas não sejam descartadas.
 
