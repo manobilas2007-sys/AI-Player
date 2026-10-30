@@ -14,7 +14,7 @@ for name in classes:
     expected.update((name+'.'+method).lower() for method in re.findall(r'@GameTest\b[\s\S]*?public void (\w+)\(TestContext',source))
 revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
 (run/'manifest.json').write_text(json.dumps({'group':a.group,'seed':a.seed,'revision':revision,'expected':sorted(expected)},indent=2)+'\n')
-result=subprocess.run(['bash','gradlew','runGametest','--no-daemon',f'-PgameTestClasses={",".join(classes)}',f'-PscenarioSeed={a.seed}',f'-PgametestRunDir={run}'],cwd=ROOT)
+result=subprocess.run(['bash','gradlew','runGametest','--no-daemon',f'-PgameTestClasses={",".join(classes)}',f'-PscenarioSeed={a.seed}',f'-PgametestRunDir={run.relative_to(ROOT)}'],cwd=ROOT)
 report=run/'reports/gametest-results.xml'
 if not report.exists():raise SystemExit('Missing GameTest XML report')
 cases=list(ET.parse(report).iter('testcase'));names=[c.attrib['name'].lower() for c in cases]
