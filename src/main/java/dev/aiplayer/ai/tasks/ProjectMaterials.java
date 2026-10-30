@@ -608,6 +608,20 @@ public final class ProjectMaterials {
         var hit=world.raycast(new RaycastContext(eyes,end,RaycastContext.ShapeType.COLLIDER,RaycastContext.FluidHandling.NONE,npc));
         return hit.getType()==HitResult.Type.MISS || hit.getBlockPos().equals(pos);
     }
+    /** A drop can balance on the edge of an unfinished sand column. Finish
+     * the safe top-down cut before pursuing it; a contact path on the floor
+     * cannot collect an item two blocks above the worker. The bounding box,
+     * rather than its center cell, identifies the real supporting column. */
+    private boolean restsOnQuarryColumn(ServerWorld world,Item item,ItemEntity drop){
+        if(drop.getY()-npc.getY()<=1.5 || npc.survival().canCollect(drop))return false;
+        Box foot=drop.getBoundingBox().offset(0,-0.05,0);
+        for(BlockPos pos:BlockPos.iterate(BlockPos.ofFloored(foot.minX,foot.minY,foot.minZ),
+                BlockPos.ofFloored(foot.maxX,foot.minY,foot.maxZ))){
+            if(world.isChunkLoaded(pos) && world.getBlockState(pos).getBlock() instanceof net.minecraft.block.FallingBlock
+                    && safeTarget(world,pos,item,false))return true;
+        }
+        return false;
+    }
     private boolean gather(ServerWorld world,Item item,int amount,int depth){
         if(!npc.autoLoot){status="Ative a coleta de drops para obter "+label(item);return false;}
         if(!excavation.digging() && !npc.isTouchingWater() && npc.intelligence().recoverForWork()){
@@ -617,6 +631,7 @@ public final class ProjectMaterials {
         List<ItemEntity> drops=world.getEntitiesByClass(ItemEntity.class,npc.getBoundingBox().expand(32),
             drop->drop.isAlive() && drop.getStack().isOf(item) && !drop.cannotPickup()
                 && !avoidedDrops.containsKey(drop.getUuid()) && npc.backpack.canInsert(drop.getStack())
+                && !restsOnQuarryColumn(world,item,drop)
                 && (!excavation.digging() || (excavation.pickupReady() && excavation.pickupPosition(drop.getBlockPos()))));
         // The stair owns movement until its supported step is open. A drop
         // route can otherwise put the NPC on the next unmined step, forcing

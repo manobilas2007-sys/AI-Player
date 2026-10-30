@@ -158,4 +158,32 @@ public final class QuarryExcavationRegressionTests implements FabricGameTest {
         c.runAtEveryTick(()->{if(n.age<10 || done[0])return;wet[0]|=n.isTouchingWater();done[0]=work.sealWater(target,Items.DIRT);});
         c.runAtTick(140,()->{c.assertTrue(wet[0] && done[0] && n.backpack.count(Items.DIRT)==0 && c.getWorld().getBlockState(target).isOf(Blocks.DIRT),"Swimming recovery preempted actual containment placement: "+work.diagnostics());c.complete();});
     }
+
+    private void perchedDrop(TestContext c,boolean save){
+        V070Fixtures.floor(c,20,0,Blocks.STONE);V070Fixtures.floor(c,20,1,Blocks.DIRT);
+        BlockPos base=c.getAbsolutePos(new BlockPos(10,2,6));c.getWorld().setBlockState(base,Blocks.SAND.getDefaultState());c.getWorld().setBlockState(base.up(),Blocks.SAND.getDefaultState());
+        // A real drop resting across the corner: its center cell is outside
+        // the column, but its collision box is supported by the top block.
+        var drop=new net.minecraft.entity.ItemEntity(c.getWorld(),base.getX()+0.265,base.getY()+2,base.getZ()+1.105,new ItemStack(Items.SAND));
+        drop.setVelocity(Vec3d.ZERO);drop.setPickupDelay(0);c.getWorld().spawnEntity(drop);
+        var npc=V070Fixtures.worker(c,new BlockPos(6,2,6));npc.autoCraft=true;npc.equipStack(EquipmentSlot.MAINHAND,new ItemStack(Items.IRON_SHOVEL));
+        ProjectMaterials[] materials={new ProjectMaterials(npc,new ProjectWork(npc))};boolean[] done={false},reloaded={false};
+        c.runAtEveryTick(()->{
+            if(npc.age<5)return;
+            if(!done[0])done[0]=materials[0].ensure(Items.SAND,3);
+            if(save && !reloaded[0] && c.getWorld().getBlockState(base.up()).isAir()){
+                NbtCompound data=new NbtCompound();materials[0].writeNbt(data);materials[0].pause();materials[0]=new ProjectMaterials(npc,new ProjectWork(npc));materials[0].readNbt(data);reloaded[0]=true;
+            }
+            if(done[0]){
+                c.assertTrue(materials[0].count(Items.SAND)==3 && c.getWorld().getBlockState(base).isAir() && c.getWorld().getBlockState(base.up()).isAir(),"Perched quarry did not conserve its real drops");
+                c.assertTrue(npc.getHealth()==npc.getMaxHealth() && npc.getMainHandStack().getDamage()>=2,"Quarry did not safely mine both blocks");
+                if(save)c.assertTrue(reloaded[0],"Quarry did not resume a saved pending batch");c.complete();
+            }
+        });
+        c.runAtTick(1000,()->c.assertTrue(done[0],"Elevated drop starved the remaining quarry: "+materials[0].diagnostics()));
+    }
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="v070_quarries",tickLimit=1100)
+    public void elevatedDropWaitsForRemainingColumn(TestContext c){perchedDrop(c,false);}
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="v070_quarries",tickLimit=1100)
+    public void elevatedDropQuarryResumesSavedBatch(TestContext c){perchedDrop(c,true);}
 }

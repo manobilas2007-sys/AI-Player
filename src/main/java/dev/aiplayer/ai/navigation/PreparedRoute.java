@@ -52,7 +52,13 @@ public final class PreparedRoute {
     public boolean active(){return !steps.isEmpty();}
     public String status(){return status;}
     public String diagnostics(){return status+" next="+steps.peek()+" remaining="+steps.size()+" supplies="+requiredSupports+" supplyDrop="+supplyDrop;}
-    public void pause(){steps.clear();actions.clear();estimatedCosts.clear();jump.reset();mining.reset();last=null;progressStep=null;requiredSupports=0;npc.setSprinting(false);npc.navigationPlan().stopOrdinary();}
+    public boolean swimming(){return active() && actions.get(steps.peek())==Movement.SWIM;}
+    private void releaseMotion(){
+        npc.getMoveControl().moveTo(npc.getX(),npc.getY(),npc.getZ(),0);
+        npc.setForwardSpeed(0);npc.setSidewaysSpeed(0);npc.getJumpControl().tick();npc.setJumping(false);
+        npc.setVelocity(0,npc.getVelocity().y,0);
+    }
+    public void pause(){boolean moving=active();steps.clear();actions.clear();estimatedCosts.clear();jump.reset();mining.reset();last=null;progressStep=null;requiredSupports=0;npc.setSprinting(false);npc.navigationPlan().stopOrdinary();if(moving)releaseMotion();}
     private ServerWorld world(){return (ServerWorld)npc.getWorld();}
     private boolean loaded(BlockPos p){return boundary.test(p) && world().isChunkLoaded(p)
         && world().getWorldBorder().contains(p) && p.getY()>world().getBottomY()+1 && p.getY()<world().getTopY()-2;}
@@ -247,7 +253,9 @@ public final class PreparedRoute {
         Movement action=actions.get(next);
         if(npc.getPos().squaredDistanceTo(Vec3d.ofBottomCenter(next))<0.3 && Math.abs(npc.getY()-next.getY())<0.15
                 && (npc.isOnGround() || action==Movement.SWIM || action==Movement.CLIMB)){
-            steps.remove();actions.remove(next);estimatedCosts.remove(next);jump.reset();mining.reset();started=npc.age;last=npc.getPos();return active();
+            steps.remove();actions.remove(next);estimatedCosts.remove(next);jump.reset();mining.reset();started=npc.age;last=npc.getPos();
+            if(!active()){npc.navigationPlan().stopOrdinary();releaseMotion();}
+            return active();
         }
         double stepDistance=npc.squaredDistanceTo(Vec3d.ofBottomCenter(next));
         if(!next.equals(progressStep)){progressStep=next;bestStepDistance=stepDistance;started=npc.age;}
@@ -256,15 +264,28 @@ public final class PreparedRoute {
         // remaining cost shrinks during mining and is not a valid timeout.
         int timeout=(int)Math.min(1200,Math.max(200,estimatedCosts.getOrDefault(next,0.0)+100));
         if(npc.age-started>timeout || npc.getBlockPos().getManhattanDistance(next)>5){npc.navigationPlan().failed(next);pause();return false;}
-        int checked=0;
+        int checked=0;BlockPos previous=npc.getBlockPos();
         for(BlockPos upcoming:steps){
             if(checked++>=3)break;
             Movement future=actions.get(upcoming);
+            // Flow can wet a formerly dry walking edge after planning. The
+            // same clear, adjacent body corridor is now a swimming edge, not
+            // a blocked cell to blacklist while the current carries us away.
+            if(future!=Movement.SWIM && future!=Movement.CLIMB
+                    && Math.abs(upcoming.getY()-previous.getY())<=1
+                    && Math.abs(upcoming.getX()-previous.getX())<=1 && Math.abs(upcoming.getZ()-previous.getZ())<=1
+                    && aquatic(previous) && aquatic(upcoming)
+                    && (water(upcoming)||water(upcoming.up()))){
+                future=Movement.SWIM;actions.put(upcoming,future);
+                estimatedCosts.put(upcoming,ActionCosts.WALK_ONE_IN_WATER_COST+4);
+            }
             if(!loaded(upcoming) || hazard(upcoming) || hazard(upcoming.up())
                     || (future!=Movement.SWIM && future!=Movement.CLIMB && (!dry(upcoming)||!dry(upcoming.up())))){
                 npc.navigationPlan().failed(upcoming);pause();return false;
             }
+            previous=upcoming;
         }
+        action=actions.get(next);
         BlockPos base=npc.getBlockPos();
         if(next.getY()-base.getY()>1 && action!=Movement.CLIMB && action!=Movement.SWIM){
             npc.navigationPlan().failed(next);pause();return false;

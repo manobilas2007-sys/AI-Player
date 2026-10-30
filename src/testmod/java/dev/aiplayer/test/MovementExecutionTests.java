@@ -186,4 +186,34 @@ public final class MovementExecutionTests implements FabricGameTest {
     public void worldChangeInvalidatesJumpArc(TestContext c){V070Fixtures.floor(c,16,1,Blocks.STONE);var n=V070Fixtures.worker(c,new BlockPos(4,2,6));BlockPos from=n.getBlockPos(),to=from.east(3);c.getWorld().setBlockState(from.east().down(),Blocks.AIR.getDefaultState());c.getWorld().setBlockState(from.east(2).down(),Blocks.AIR.getDefaultState());c.assertTrue(JumpMotion.possible(n,from,to,p->true),"Initial arc should be open");c.getWorld().setBlockState(from.east().up(2),Blocks.STONE.getDefaultState());c.assertFalse(JumpMotion.possible(n,from,to,p->true),"Cached jump ignored new ceiling");c.complete();}
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="v070_movement",tickLimit=100)
     public void preparedMovementOwnsChunkTicket(TestContext c){V070Fixtures.floor(c,20,1,Blocks.STONE);var n=V070Fixtures.worker(c,new BlockPos(3,2,5));n.tasks().startAt(CompanionTasks.Kind.TEND_FARM,n.getBlockPos(),null);c.runAtTick(30,()->{c.assertTrue(CompanionChunkLoading.loadedCenter(n)!=null,"Work route has no ticking chunk");n.tasks().cancel();c.complete();});}
+
+    private void swimmingBank(TestContext c,boolean checkStop){
+        V070Fixtures.floor(c,24,0,Blocks.STONE);V070Fixtures.floor(c,24,1,Blocks.DIRT);
+        for(int x=5;x<=10;x++)for(int z=0;z<24;z++)for(int y=1;y<=2;y++)c.setBlockState(new BlockPos(x,y,z),Blocks.WATER);
+        for(int x=11;x<24;x++)for(int z=0;z<24;z++)c.setBlockState(new BlockPos(x,2,z),Blocks.DIRT);
+        var npc=V070Fixtures.worker(c,new BlockPos(7,2,6));BlockPos goal=c.getAbsolutePos(new BlockPos(15,3,6));
+        var route=new PreparedRoute(npc,p->Math.abs(p.getZ()-goal.getZ())<=1 && p.getX()<=goal.getX()+2);route.allowChanges(false);
+        int[] arrived={-1};boolean[] swam={false};
+        c.runAtEveryTick(()->{
+            if(npc.age<5)return;
+            if(npc.isTouchingWater())swam[0]=true;
+            if(arrived[0]>=0){
+                if(checkStop && npc.age-arrived[0]>=80){
+                    c.assertTrue(npc.isOnGround() && npc.squaredDistanceTo(Vec3d.ofBottomCenter(goal))<0.65,"Swimming left residual movement after arrival: "+npc.getPos());
+                    c.assertTrue(npc.getVelocity().horizontalLengthSquared()<0.0004,"Idle swimmer still accelerates on the bank");c.complete();
+                }
+                return;
+            }
+            if(npc.isOnGround() && !npc.isTouchingWater() && npc.squaredDistanceTo(Vec3d.ofBottomCenter(goal))<0.4){
+                c.assertTrue(swam[0] && npc.getHealth()==npc.getMaxHealth(),"Bank handoff bypassed swimming or caused damage");
+                arrived[0]=npc.age;route.pause();if(!checkStop)c.complete();return;
+            }
+            if(route.active())route.tick();else route.begin(goal,0);
+        });
+        c.runAtTick(900,()->c.assertTrue(arrived[0]>=0,"Could not hand swimming over to dry ground: "+npc.getPos()+" "+route.diagnostics()));
+    }
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="v070_movement",tickLimit=1000)
+    public void swimmingHandsOffToGroundedBank(TestContext c){swimmingBank(c,false);}
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="v070_movement",tickLimit=1000)
+    public void completedSwimmingRouteBrakesAtDestination(TestContext c){swimmingBank(c,true);}
 }

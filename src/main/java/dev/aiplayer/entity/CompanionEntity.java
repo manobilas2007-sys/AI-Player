@@ -93,7 +93,10 @@ public class CompanionEntity extends PathAwareEntity implements ExtendedScreenHa
         super.initDataTracker(); dataTracker.startTracking(OWNER, Optional.empty()); dataTracker.startTracking(MODE,0); dataTracker.startTracking(EATING,false);dataTracker.startTracking(WORKING,false);dataTracker.startTracking(ATTACK_TICKS,0);dataTracker.startTracking(INTERACTION,0);dataTracker.startTracking(INTERACTION_TICKS,0);
     }
     @Override protected void initGoals() {
-        goalSelector.add(0,new SwimGoal(this));
+        goalSelector.add(0,new SwimGoal(this){
+            @Override public boolean canStart(){return super.canStart() && (navigationPlan==null || !navigationPlan.controlsSwimming());}
+            @Override public boolean shouldContinue(){return canStart();}
+        });
         goalSelector.add(1,new CompanionGoal(this));
         goalSelector.add(8,new LookAtEntityGoal(this,PlayerEntity.class,8));
         goalSelector.add(9,new LookAroundGoal(this));

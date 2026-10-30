@@ -39,6 +39,8 @@ public final class NpcNavigation {
     public int replans(){return replans;}
     public void resetWatchdog(){visits.clear();lastCell=null;progressAt=npc.age;best=Double.POSITIVE_INFINITY;replans=0;}
     public boolean prepared(){return executor!=null && executor.active();}
+    public boolean controlsSwimming(){return prepared() && executor.swimming() && npc.getAir()>=150
+        && !npc.menuOpen() && !npc.isEating() && npc.getTarget()==null;}
     public Outcome outcome(){return outcome;}
     public BlockPos destination(){return destination;}
     public String diagnostics(){return outcome+" goal="+destination+" replans="+replans+" noProgress="+(npc.age-progressAt);}

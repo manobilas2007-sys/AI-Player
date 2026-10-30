@@ -219,7 +219,7 @@ este documento não declara testes executados sem o respectivo resultado.
 
 ## Cobertura e critérios de entrega da 0.7.0
 
-A suíte contém 374 nomes distintos: 185 preservados e 189 novos. A ampliação cobre 45 cenários de movimento, 30 de árvores/FallingTree, 31 de pedreiras e restauração, 30 de terreno/construção, 28 de lotes/receitas e 25 de memória/viagens. Os grupos críticos são repetidos nas sementes 17, 104729 e 8675309, em mundos isolados.
+A suíte contém 378 nomes distintos: 185 preservados e 193 novos. A ampliação cobre 47 cenários de movimento, 30 de árvores/FallingTree, 33 de pedreiras e restauração, 30 de terreno/construção, 28 de lotes/receitas e 25 de memória/viagens. Os grupos críticos são repetidos nas sementes 17, 104729 e 8675309, em mundos isolados.
 
 `tools/verify_gametest_suite.py` verifica os nomes exatos, ausência de omissões/falhas, todas as sementes e uma única revisão de fontes. A execução completa e os testes de produção Fabric 0.15.11 e 0.20.0 são necessários para gerar o pacote `VALIDADO`. Consulte o relatório da revisão; a existência dos testes no código não declara que uma execução passou.
 
@@ -232,3 +232,5 @@ O índice de recursos varre seções residentes com orçamento compartilhado de 
 Lotes distinguem mínimo para a próxima ação, quantidade planejada e entrega. Uma dependência antiga salva conserva sua quantidade. Um lote parcial é usado quando acaba a varredura local e não há outra fonte acessível conhecida; uma obra com muitos recursos disponíveis continua coletando em lote. NBT de materiais versão 3 lê as versões anteriores; caminhos em andamento são recalculados após carregar.
 
 A interação aquática é autorizada para conter água com blocos reais e exige alcance, espaço livre, propriedade e ar suficiente. Gravidade não permite entrar sob blocos caindo. Elytra, portais/interdimensões e importação de esquemas arbitrários não fazem parte desta entrega. A validação cobre os cenários nomeados, sem prometer uma rota global ótima através de terreno desconhecido.
+
+A navegação revalida água que avança sobre trechos antes secos e transfere o controle de natação para caminhada ao alcançar apoio na margem. Ao terminar ou cancelar uma rota, libera os comandos de movimento e freia o deslocamento horizontal. Drops apoiados na borda de uma coluna de areia aguardam o corte seguro dos blocos restantes antes da coleta física.
