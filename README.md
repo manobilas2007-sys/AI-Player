@@ -1,4 +1,11 @@
-# AI Player v0.6.3-dev — diálogos, abrigo e agricultura
+# AI Player v0.7.0-dev — navegação e projetos autônomos
+
+A versão 0.7.0 amplia a navegação física do NPC com saltos, escadas, natação, saídas da água, quedas controladas e colocação de apoios. O planejamento e a execução compartilham o controle do movimento e recalculam caminhos quando o terreno muda ou o progresso trava. Recursos ficam registrados por dimensão, incluindo blocos ocultos nos chunks carregados pelo próprio NPC durante as viagens.
+
+Os projetos calculam os materiais restantes e coletam em lotes. FallingTree também é usado na madeira destinada à construção. Quando os recursos conhecidos acabam, um lote parcial utilizável pode retornar à obra, preservando sua quantidade após salvar. Pedreiras tratam colunas de areia, contenção de água e recolhimento físico dos drops.
+
+A suíte contém **374 GameTests distintos**, incluindo os **185 anteriores**. Os cenários críticos são repetidos em mundos novos com sementes **17, 104729 e 8675309**; repetições não aumentam a contagem de cobertura. O artefato do Actions com `VALIDADO` no nome só é disponibilizado depois da aprovação de todos os grupos, do build e dos testes dos JARs em dois carregadores Fabric.
+
 
 Minecraft Java **1.20.1**, Fabric, Java 17 e Gradle Wrapper 8.7.
 
@@ -32,7 +39,7 @@ Responda **“sim”** ou **“pode começar”** para autorizar a proposta; **�
 
 ## Trabalho no mundo
 
-O abrigo possui piso de 5×7, madeira consistente, janelas de vidro, porta, telhado com escadas e lajes, bancada e fornalha. Preparação do terreno remove vegetação e neve fisicamente e permite cortes e fundações naturais limitados; construções protegidas, inventários e blocos de outros NPCs são preservados. Terreno com lava, água, grandes desníveis ou sem apoio exige outro local seguro.
+O abrigo possui piso de 5×7, madeira consistente, janelas de vidro, porta, telhado com escadas e lajes, bancada e fornalha. A preparação mede as colunas do terreno, escolhe uma altura de piso no local confirmado, remove vegetação e neve e executa cortes e fundações até o apoio natural, consumindo blocos reais. Construções protegidas, inventários e blocos de outros NPCs são preservados. Água ou lava no local da casa e ausência de apoio sólido continuam impedindo uma fundação segura.
 
 Todos os blocos e ingredientes são reais. A busca de materiais preserva o solo reservado à própria obra, e todo o canal de irrigação precisa estar preparado antes de receber água. Ao trocar de projeto, o NPC prepara estações de trabalho locais. O planejador pode procurar madeira da espécie selecionada, pedra, areia, ferro e combustível em terreno acessível que vai sendo carregado ao caminhar, fabricar componentes e usar uma fornalha vanilla. O ferro do balde e o vidro precisam ser obtidos e processados; nenhuma tarefa cria materiais ou sementes gratuitamente. Sem uma rota ou recurso acessível, o status explica a necessidade pendente.
 
@@ -52,3 +59,13 @@ python3 tools/check_embedded_baritone.py
 O workflow compila os arquivos do repositório, verifica o JAR distribuído, testa navegação/combate em servidores Fabric 0.20.0 e 0.15.11 e executa os GameTests. Consulte o resultado da revisão no Actions; este texto não declara uma execução no Android/Fold Craft Launcher.
 
 O ZIP r7 original permanece preservado. Proveniência e licenças estão em [LICENSE.md](LICENSE.md), `third-party/Baritone/` e [docs/INTEGRACAO_BARITONE.md](docs/INTEGRACAO_BARITONE.md).
+
+
+Para reproduzir a validação isolada do CI:
+
+```sh
+python3 tools/run_gametest_group.py --group quarries --seed 17
+python3 tools/run_gametest_group.py --group critical --seed 104729
+```
+
+Os grupos estão em `tools/gametest-groups.json`. Cada execução usa outro diretório de mundo; `tools/verify_gametest_suite.py` exige todos os nomes esperados, todas as sementes e a mesma revisão de fontes, rejeitando falhas, testes omitidos ou contagens duplicadas. O teste de sementes pertence somente ao mod de testes e não é incluído no JAR jogável.
