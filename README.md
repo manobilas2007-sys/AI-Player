@@ -4,7 +4,7 @@ A versão 0.7.0 amplia a navegação física do NPC com saltos, escadas, nataç�
 
 Os projetos calculam os materiais restantes e coletam em lotes. FallingTree também é usado na madeira destinada à construção. Quando os recursos conhecidos acabam, um lote parcial utilizável pode retornar à obra, preservando sua quantidade após salvar. Pedreiras tratam colunas de areia, contenção de água e recolhimento físico dos drops.
 
-A suíte contém **374 GameTests distintos**, incluindo os **185 anteriores**. Os cenários críticos são repetidos em mundos novos com sementes **17, 104729 e 8675309**; repetições não aumentam a contagem de cobertura. O artefato do Actions com `VALIDADO` no nome só é disponibilizado depois da aprovação de todos os grupos, do build e dos testes dos JARs em dois carregadores Fabric.
+A suíte contém **378 GameTests distintos**, incluindo os **185 anteriores**. Os cenários críticos são repetidos em mundos novos com sementes **17, 104729 e 8675309**; repetições não aumentam a contagem de cobertura. O artefato do Actions com `VALIDADO` no nome só é disponibilizado depois da aprovação de todos os grupos, do build e dos testes dos JARs em dois carregadores Fabric.
 
 
 Minecraft Java **1.20.1**, Fabric, Java 17 e Gradle Wrapper 8.7.
