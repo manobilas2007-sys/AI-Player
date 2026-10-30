@@ -114,7 +114,7 @@ tasks.named('processTestmodResources') {
         if (selection) {
             def file = new File(destinationDir, 'fabric.mod.json')
             def metadata = new groovy.json.JsonSlurper().parse(file)
-            def names = selection.split(',').toSet()
+            def names = selection.tokenize(',') as Set
             def selected = metadata.entrypoints.'fabric-gametest'.findAll { names.contains(it.tokenize('.').last()) }
             if (selected.size() != names.size()) throw new GradleException("Unknown/duplicate GameTest class selection: " + selection)
             metadata.entrypoints.'fabric-gametest' = selected
