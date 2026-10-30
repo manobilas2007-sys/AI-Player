@@ -1,6 +1,6 @@
 plugins { id 'java-library' }
 group = 'dev.aiplayer'
-version = '1.10.5-npc.1'
+version = '1.10.5-npc.2'
 base { archivesName = 'ai-player-baritone-core' }
 java {
     sourceCompatibility = JavaVersion.VERSION_17

@@ -25,7 +25,7 @@ public final class SafeExcavation {
     private final CompanionEntity npc;
     private final PhysicalMining miner;
     private Shape shape;
-    private BlockPos origin;
+    private BlockPos origin,resourceGoal;
     private Direction direction, side;
     private int depth, slot, stepStarted, lastRoute, emptySteps, pausedAt=-1;
     private boolean foundStone;
@@ -44,8 +44,17 @@ public final class SafeExcavation {
     public SafeExcavation(CompanionEntity npc,PhysicalMining miner){this.npc=npc;this.miner=miner;}
     public boolean active(){return shape!=null;}
     public Shape shape(){return shape;}
+    /** Pickup is a separate stage at a completed, supported step. Do not let
+     * a drop put the worker on a future block the stair still needs to cut. */
+    public boolean pickupReady(){return active() && (slot==0 || slot>=slots()) && npc.isOnGround();}
+    public boolean pickupPosition(BlockPos p){
+        if(!active())return true;
+        int forward=(p.getX()-origin.getX())*direction.getOffsetX()+(p.getZ()-origin.getZ())*direction.getOffsetZ();
+        int completed=slot>=slots()?depth:depth-1;
+        return permission.test(p) && forward<=completed;
+    }
     public String diagnostics(){return "lastStop="+lastStop+" "+shape+" origin="+origin+" direction="+direction+" depth="+depth+" slot="+slot+" stepAge="+(npc.age-stepStarted);}
-    public void stop(){shape=null;origin=null;miner.reset();npc.getNavigation().stop();}
+    public void stop(){shape=null;origin=null;resourceGoal=null;miner.reset();npc.getNavigation().stop();}
     public void pause(){if(pausedAt<0)pausedAt=npc.age;miner.reset();}
     public void resume(){if(pausedAt>=0){stepStarted+=npc.age-pausedAt;pausedAt=-1;}}
     private boolean loaded(BlockPos pos){return permission.test(pos) && npc.getWorld().isChunkLoaded(pos)
@@ -163,11 +172,20 @@ public final class SafeExcavation {
         }
         return false;
     }
+    public boolean beginStairToward(BlockPos resource){
+        if(active())return true;
+        BlockPos base=npc.getBlockPos();
+        int dx=resource.getX()-base.getX(),dz=resource.getZ()-base.getZ();
+        Direction preferred=Math.abs(dx)>=Math.abs(dz)?(dx>=0?Direction.EAST:Direction.WEST):(dz>=0?Direction.SOUTH:Direction.NORTH);
+        for(Direction face:new Direction[]{preferred,preferred.rotateYClockwise(),preferred.rotateYCounterclockwise(),preferred.getOpposite()})
+            if(begin(Shape.STAIR,base,face,null)){resourceGoal=resource.toImmutable();return true;}
+        return false;
+    }
     public Result tick(){
         if(!active())return Result.FINISHED;
         resume();
         if(npc.age-stepStarted>180){lastStop="step timeout at "+foot(depth)+" npc="+npc.getPos();stop();return Result.BLOCKED;}
-        if(depth>(shape==Shape.STAIR?(prospecting?32:MAX_STAIR):(prospecting?24:MAX_GALLERY))) {stop();return Result.FINISHED;}
+        if(depth>(shape==Shape.STAIR?(prospecting?npc.getWorld().getHeight():MAX_STAIR):(prospecting?24:MAX_GALLERY))) {stop();return Result.FINISHED;}
         if(!safeStep(depth)){lastStop=rejection;stop();return Result.BLOCKED;}
         while(slot<slots()){
             BlockPos p=cell(depth,slot);
@@ -197,11 +215,15 @@ public final class SafeExcavation {
         BlockPos destination=foot(depth);
         if(npc.isOnGround() && npc.getPos().squaredDistanceTo(Vec3d.ofBottomCenter(destination))<0.65
                 && Math.abs(npc.getY()-destination.getY())<0.12){
-            if(shape==Shape.STAIR && foundStone){
+            if(shape==Shape.STAIR && foundStone && (resourceGoal==null || destination.getY()<=resourceGoal.getY())){
                 // At the first natural stone layer, switch from descending steps
                 // to a two-high/two-wide horizontal gallery. The stairs behind
                 // remain intact and can be walked back up.
                 origin=destination.toImmutable();shape=Shape.GALLERY;
+                if(resourceGoal!=null){
+                    int dx=resourceGoal.getX()-origin.getX(),dz=resourceGoal.getZ()-origin.getZ();
+                    direction=Math.abs(dx)>=Math.abs(dz)?(dx>=0?Direction.EAST:Direction.WEST):(dz>=0?Direction.SOUTH:Direction.NORTH);
+                }
                 side=direction.rotateYClockwise();depth=1;slot=0;
                 stepStarted=npc.age;lastRoute=0;emptySteps=0;foundStone=false;initialTargetDepth=1;
                 if(!safeStep(1)){stop();return Result.FINISHED;}
@@ -232,6 +254,7 @@ public final class SafeExcavation {
 
     public void writeNbt(net.minecraft.nbt.NbtCompound n){
         if(!active())return;
+        if(resourceGoal!=null)n.putLong("ResourceGoal",resourceGoal.asLong());
         n.putString("Shape",shape.name());n.putLong("Origin",origin.asLong());
         n.putString("Direction",direction.getName());if(side!=null)n.putString("Side",side.getName());
         n.putInt("Depth",depth);n.putInt("Slot",slot);n.putInt("EmptySteps",emptySteps);
@@ -242,7 +265,8 @@ public final class SafeExcavation {
         try{shape=Shape.valueOf(n.getString("Shape"));}catch(IllegalArgumentException invalid){return;}
         direction=Direction.byName(n.getString("Direction"));side=Direction.byName(n.getString("Side"));
         if(direction==null || direction.getAxis().isVertical() || (shape==Shape.GALLERY && (side==null || side.getAxis().isVertical()))){stop();return;}
-        origin=BlockPos.fromLong(n.getLong("Origin"));depth=Math.max(1,Math.min(32,n.getInt("Depth")));
+        origin=BlockPos.fromLong(n.getLong("Origin"));depth=Math.max(1,Math.min(npc.getWorld().getHeight(),n.getInt("Depth")));
+        if(n.contains("ResourceGoal"))resourceGoal=BlockPos.fromLong(n.getLong("ResourceGoal"));
         slot=Math.max(0,Math.min(slots(),n.getInt("Slot")));emptySteps=Math.max(0,n.getInt("EmptySteps"));
         foundStone=n.getBoolean("FoundStone");initialTargetDepth=Math.max(1,Math.min(4,n.getInt("InitialDepth")));
         stepStarted=npc.age;lastRoute=0;pausedAt=-1;

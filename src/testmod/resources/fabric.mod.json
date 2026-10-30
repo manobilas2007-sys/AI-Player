@@ -26,11 +26,20 @@
       "dev.aiplayer.test.LongRangeResourceTests",
       "dev.aiplayer.test.HouseNaturalTerrainTests",
       "dev.aiplayer.test.ManualResourceSurveyTests",
-      "dev.aiplayer.test.ResourceAccessTests"
+      "dev.aiplayer.test.ResourceAccessTests",
+      "dev.aiplayer.test.TreeProjectRegressionTests",
+      "dev.aiplayer.test.MovementExecutionTests",
+      "dev.aiplayer.test.MaterialBatchRegressionTests",
+      "dev.aiplayer.test.ResourceMemoryJourneyTests",
+      "dev.aiplayer.test.TerrainConstructionRegressionTests",
+      "dev.aiplayer.test.QuarryExcavationRegressionTests"
     ]
   },
   "depends": {
     "aiplayer": "*",
     "fabric-gametest-api-v1": "*"
-  }
+  },
+  "mixins": [
+    "aiplayer-test.mixins.json"
+  ]
 }

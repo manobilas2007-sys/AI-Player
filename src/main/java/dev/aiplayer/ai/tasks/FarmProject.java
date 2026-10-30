@@ -64,6 +64,8 @@ public final class FarmProject {
     private int cursor,completed,actionTicks,fieldCursor,scanRadius,scanEdge,waterRadius,waterEdge,waterY;
     private int nextScan,harvestSince,nextDropMove,planted;
     private int sourceSince,waterSearchLeg,basinCursor;
+    private int clearLayers=3;
+    private boolean surveyedTerrain;
     private double sourceDistance=Double.MAX_VALUE;
 
     public FarmProject(CompanionEntity npc,ProjectWork work,ProjectMaterials materials){
@@ -106,6 +108,7 @@ public final class FarmProject {
         action=null;pendingHarvest=null;source=null;waterScanOrigin=null;cursor=0;completed=0;fieldCursor=0;
         actionTicks=0;scanRadius=0;scanEdge=0;waterRadius=0;waterEdge=0;waterY=0;nextScan=0;planted=0;
         sourceSince=0;sourceDistance=Double.MAX_VALUE;waterSearchLeg=0;basinCursor=0;basinPrepared=false;
+        clearLayers=3;surveyedTerrain=false;
         status="Plantação cancelada";
     }
     private boolean rules(ServerWorld world){
@@ -277,16 +280,21 @@ public final class FarmProject {
             && world.getBlockEntity(pos)==null;
     }
     private void survey(ServerWorld world){
+        if(!surveyedTerrain){
+            SiteTerrainPlan plan=SiteTerrainPlan.survey(world,anchor.up(),SIZE,SIZE,3);if(plan==null)return;
+            anchor=plan.floor().down();clearLayers=Math.max(3,plan.clearTop()-anchor.getY());
+            stationsOutsideFarm();surveyedTerrain=true;
+        }
         for(int i=0;i<SIZE*SIZE;i++){
             BlockPos ground=cell(i);
-            for(int y=-1;y<=3;y++){
+            for(int y=-1;y<=clearLayers;y++){
                 BlockPos p=ground.up(y);
                 if(!editAllowed(world,p) || !natural(world.getBlockState(p)) || !world.getFluidState(p).isEmpty()){
                     status="Escolha outro local: preservar construção, água ou terreno protegido";return;
                 }
             }
             boolean support=false;
-            for(int depth=1;depth<=4;depth++){
+            for(int depth=1;ground.getY()-depth>world.getBottomY();depth++){
                 BlockPos below=ground.down(depth);
                 if(!world.isChunkLoaded(below))break;
                 if(world.getBlockState(below).isSolidBlock(world,below)){support=true;break;}
@@ -296,8 +304,8 @@ public final class FarmProject {
         phase=Phase.CLEAR;cursor=0;status="Limpar vegetação, neve e desníveis naturais";
     }
     private void clear(ServerWorld world){
-        if(cursor>=SIZE*SIZE*3){phase=Phase.FOUNDATION;cursor=0;return;}
-        int layer=3-cursor/(SIZE*SIZE);BlockPos pos=cell(cursor%(SIZE*SIZE)).up(layer);
+        if(cursor>=SIZE*SIZE*clearLayers){phase=Phase.FOUNDATION;cursor=0;return;}
+        int layer=clearLayers-cursor/(SIZE*SIZE);BlockPos pos=cell(cursor%(SIZE*SIZE)).up(layer);
         if(world.getBlockState(pos).isAir()){cursor++;return;}
         if(!prepareMining(world.getBlockState(pos)))return;
         if(work.safeMine(pos))cursor++;else status=work.status();
@@ -338,7 +346,7 @@ public final class FarmProject {
     }
     private boolean supportBelow(ServerWorld world,BlockPos ground){
         int support=0;
-        for(int depth=1;depth<=4;depth++){
+        for(int depth=1;ground.getY()-depth>world.getBottomY();depth++){
             BlockPos below=ground.down(depth);
             if(!world.isChunkLoaded(below)){status="Aguardar terreno carregado";return false;}
             if(world.getBlockState(below).isSolidBlock(world,below)){support=depth;break;}
@@ -349,7 +357,7 @@ public final class FarmProject {
         if(support==0){status="Desnível sem apoio seguro para a plantação";return false;}
         if(support==1)return true;
         BlockPos missing=ground.down(support-1);
-        if(!materials.ensure(Items.DIRT,1)){status=materials.status();return false;}
+        if(!materials.ensureForProject(Items.DIRT,1)){status=materials.status();return false;}
         if(work.place(missing,Blocks.DIRT.getDefaultState(),Items.DIRT,1))completed++;else status=work.status();
         return false;
     }
@@ -367,7 +375,7 @@ public final class FarmProject {
             if(!prepareMining(state))return;
             if(!work.safeMine(pos)){status=work.status();return;}
         }
-        if(!materials.ensure(required,1)){status=materials.status();return;}
+        if(!materials.ensureForProject(required,1)){status=materials.status();return;}
         if(work.place(pos,wanted,required,1)){cursor++;completed++;}else status=work.status();
     }
     private boolean stillWater(ServerWorld world,BlockPos pos){
@@ -542,6 +550,7 @@ public final class FarmProject {
         if(!dimension.equals(world.getRegistryKey().getValue().toString())){cancel();return;}
         if(npc.menuOpen() || npc.isEating() || npc.getTarget()!=null){pause();return;}
         if(!rules(world))return;
+        if(create)updateDemand(world);
         if(create && !materials.resumePending()){status=materials.status();return;}
         boolean fetchingWater=create && phase==Phase.WATER && basinPrepared
             && cursor<channels().size() && materials.count(Items.WATER_BUCKET)==0;
@@ -553,8 +562,26 @@ public final class FarmProject {
             case GROUND->ground(world);case WATER->water(world);case PLANT->finishPlanting(world);default->{ }
         }else tend(world);
     }
+    private void updateDemand(ServerWorld world){
+        var remaining=new java.util.LinkedHashMap<Item,Integer>();
+        if(phase==Phase.GROUND || phase==Phase.FOUNDATION){
+            for(int i=0;i<SIZE*SIZE;i++){
+                BlockPos p=cell(i);if(!world.isChunkLoaded(p))return;
+                var s=world.getBlockState(p);
+                if(edge(p)){
+                    if(s.getBlock().asItem()!=border || !OwnedBlocks.get(world).owned(p,npc.getUuid()))remaining.merge(border,1,Integer::sum);
+                }else if(!channel(p) && !s.isIn(BlockTags.DIRT) && !s.isOf(Blocks.FARMLAND))remaining.merge(Items.DIRT,1,Integer::sum);
+                if(phase==Phase.FOUNDATION && !s.isSolidBlock(world,p)){
+                    for(BlockPos q=p.down();q.getY()>world.getBottomY() && world.getBlockState(q).isAir();q=q.down())
+                        remaining.merge(Items.DIRT,1,Integer::sum);
+                }
+            }
+        }
+        materials.demand(remaining);
+    }
     public void writeNbt(NbtCompound root){
-        NbtCompound n=new NbtCompound();n.putInt("Version",1);n.putBoolean("Active",active);n.putBoolean("Create",create);
+        NbtCompound n=new NbtCompound();n.putInt("Version",2);n.putBoolean("Active",active);n.putBoolean("Create",create);
+        n.putInt("ClearLayers",clearLayers);n.putBoolean("SurveyedTerrain",surveyedTerrain);
         n.putString("Dimension",dimension);n.putString("Phase",phase.name());n.putString("Status",status);
         if(origin!=null)n.putLong("Origin",origin.asLong());if(anchor!=null)n.putLong("Anchor",anchor.asLong());
         n.putInt("Cursor",cursor);n.putInt("Completed",completed);n.putInt("Planted",planted);
@@ -573,7 +600,9 @@ public final class FarmProject {
     public void readNbt(NbtCompound root){
         cancel();if(!root.contains("FarmProject"))return;
         NbtCompound n=root.getCompound("FarmProject");
-        if(n.getInt("Version")!=1 || !n.getBoolean("Active") || !n.contains("Origin"))return;
+        if(n.getInt("Version")<1 || n.getInt("Version")>2 || !n.getBoolean("Active") || !n.contains("Origin"))return;
+        clearLayers=n.contains("ClearLayers")?Math.max(3,Math.min(npc.getWorld().getHeight(),n.getInt("ClearLayers"))):3;
+        surveyedTerrain=n.getBoolean("SurveyedTerrain");
         dimension=n.getString("Dimension");
         if(!dimension.equals(npc.getWorld().getRegistryKey().getValue().toString()))return;
         origin=BlockPos.fromLong(n.getLong("Origin"));anchor=n.contains("Anchor")?BlockPos.fromLong(n.getLong("Anchor")):origin.add(2,-1,0);
@@ -583,7 +612,7 @@ public final class FarmProject {
         }
         create=n.getBoolean("Create");
         try{phase=Phase.valueOf(n.getString("Phase"));}catch(IllegalArgumentException bad){return;}
-        cursor=Math.max(0,Math.min(SIZE*SIZE*3,n.getInt("Cursor")));completed=Math.max(0,n.getInt("Completed"));planted=Math.max(0,n.getInt("Planted"));
+        cursor=Math.max(0,Math.min(SIZE*SIZE*clearLayers,n.getInt("Cursor")));completed=Math.max(0,n.getInt("Completed"));planted=Math.max(0,n.getInt("Planted"));
         waterSurvey.readNbt(n.getCompound("WaterSurvey"));
         basinPrepared=n.getBoolean("BasinPrepared");basinCursor=Math.max(0,Math.min(channels().size(),n.getInt("BasinCursor")));
         Identifier id=Identifier.tryParse(n.getString("Border"));

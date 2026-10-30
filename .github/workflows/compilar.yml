@@ -52,7 +52,7 @@ jobs:
       - name: Disponibilizar JAR
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Player-v0.6.3-resource-access-JAR-and-sources
+          name: AI-Player-v0.7.0-build-JAR-and-sources
           path: |
             dist/*.jar
             build/libs/*-sources.jar

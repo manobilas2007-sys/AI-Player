@@ -371,6 +371,7 @@ public final class ResourceGathering {
                     || avoidedTrees.getOrDefault(p,0)>npc.age
                     || npc.intelligence().memory().blocked(p,npc.getWorld().getTime()) || !treeBase(p))continue;
                 npc.intelligence().memory().remember("tree",p,npc.getWorld().getTime(),12000);
+                npc.resourceIndex().remember(npc.getWorld().getBlockState(p).getBlock().asItem(),p);
                 searching=false;return p;
             }
         }

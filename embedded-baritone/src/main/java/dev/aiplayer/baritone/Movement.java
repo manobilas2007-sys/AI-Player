@@ -20,4 +20,4 @@
 package dev.aiplayer.baritone;
 
 /** NPC actions emitted by the server movement model; the planner performs none. */
-public enum Movement { TRAVERSE, DIAGONAL, ASCEND, DESCEND, SWIM, DIG, PLACE }
+public enum Movement { TRAVERSE, DIAGONAL, ASCEND, DESCEND, SWIM, DIG, PLACE, PARKOUR, PILLAR, CLIMB, FALL }

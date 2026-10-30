@@ -30,10 +30,28 @@ public final class TerrainRecovery {
         if(!(world instanceof ServerWorld server) || !world.isChunkLoaded(p) || world.getBlockEntity(p)!=null
             || OwnedBlocks.get(server).protectedBlock(p) || OwnedBlocks.get(server).claimed(p))return false;
         if(!(s.isIn(BlockTags.DIRT) || s.isOf(Blocks.STONE) || s.isOf(Blocks.ANDESITE)
-            || s.isOf(Blocks.DIORITE) || s.isOf(Blocks.GRANITE) || s.isOf(Blocks.SNOW) || s.isOf(Blocks.SNOW_BLOCK)))return false;
+            || s.isOf(Blocks.DIORITE) || s.isOf(Blocks.GRANITE) || s.isOf(Blocks.SNOW) || s.isOf(Blocks.SNOW_BLOCK)
+            || s.isOf(Blocks.SAND) || s.isOf(Blocks.RED_SAND) || s.isOf(Blocks.GRAVEL)))return false;
         // Do not open a liquid pocket or undermine falling sand/gravel.
         for(Direction d:Direction.values())if(!world.getFluidState(p.offset(d)).isEmpty())return false;
         return !(world.getBlockState(p.up()).getBlock() instanceof net.minecraft.block.FallingBlock);
+    }
+    /** A trapped worker can release a gravity column from its side when
+     * the top is occluded. Stay outside its entire fall footprint; wait for
+     * the real falling entities before entering the opened step. */
+    private boolean controlledCollapse(BlockPos p){
+        if(!(npc.getWorld() instanceof ServerWorld world) || !mining.reachable(p)
+                || !(world.getBlockState(p).getBlock() instanceof net.minecraft.block.FallingBlock)
+                || !world.getBlockState(p.down()).isSolidBlock(world,p.down()))return false;
+        Box column=new Box(p).stretch(0,20,0);
+        if(column.intersects(npc.getBoundingBox()) || !world.getOtherEntities(npc,column,e->e.isAlive()).isEmpty())return false;
+        for(int y=0;y<=16;y++){
+            BlockPos q=p.up(y);if(!world.isChunkLoaded(q))return false;
+            if(!(world.getBlockState(q).getBlock() instanceof net.minecraft.block.FallingBlock))return world.getBlockState(q).isAir();
+            if(OwnedBlocks.get(world).protectedBlock(q) || OwnedBlocks.get(world).claimed(q))return false;
+            for(Direction side:Direction.values())if(!world.getFluidState(q.offset(side)).isEmpty())return false;
+        }
+        return false;
     }
     public boolean trapped(){
         if(!npc.isOnGround() || npc.isTouchingWater())return false;
@@ -101,10 +119,20 @@ public final class TerrainRecovery {
             else {
                 for(BlockPos cut:new BlockPos[]{step.up(),step}){
                     if(clear(cut))continue;
-                    if(!soil(cut) || !mining.reachable(cut)){step=null;mining.reset();break;}
+                    // Expose the top of a gravity column first, then descend
+                    // through it. A falling ceiling is never mined from below.
+                    BlockPos upper=cut;
+                    while(npc.getWorld().isChunkLoaded(upper.up())
+                            && npc.getWorld().getBlockState(upper.up()).getBlock() instanceof net.minecraft.block.FallingBlock)
+                        upper=upper.up();
+                    if(!upper.equals(cut) && soil(upper) && mining.reachable(upper)){
+                        if(mining.tick(upper))npc.intelligence().restoration().removed(upper);return true;
+                    }
+                    if((!soil(cut) && !controlledCollapse(cut)) || !mining.reachable(cut)){step=null;mining.reset();break;}
                     if(mining.tick(cut))npc.intelligence().restoration().removed(cut);return true;
                 }
                 if(step!=null){
+                    if(!npc.getWorld().getEntitiesByClass(net.minecraft.entity.FallingBlockEntity.class,new Box(step).stretch(0,12,0),e->e.isAlive()).isEmpty())return true;
                     if(npc.age%10==0)npc.getNavigation().startMovingTo(step.getX()+0.5,step.getY(),step.getZ()+0.5,1);
                     return true;
                 }
@@ -151,7 +179,14 @@ public final class TerrainRecovery {
             BlockPos candidate=feet.offset(d).up();
             if(!TemporaryPillar.hasJumpSpace(npc) || failedSteps.getOrDefault(candidate,0)>npc.age)continue;
             if(!npc.getWorld().getBlockState(candidate.down()).isSolidBlock(npc.getWorld(),candidate.down()))continue;
-            if((clear(candidate)||soil(candidate)) && (clear(candidate.up())||soil(candidate.up()))){step=candidate;stepStarted=npc.age;return true;}
+            BlockPos cap=candidate.up();
+            while(npc.getWorld().isChunkLoaded(cap.up())
+                    && npc.getWorld().getBlockState(cap.up()).getBlock() instanceof net.minecraft.block.FallingBlock)cap=cap.up();
+            boolean quarry=(soil(cap) && mining.reachable(cap)
+                && npc.getWorld().getBlockState(candidate).getBlock() instanceof net.minecraft.block.FallingBlock) || controlledCollapse(candidate.up()) || controlledCollapse(candidate);
+            if(quarry || ((clear(candidate)||soil(candidate)) && (clear(candidate.up())||soil(candidate.up())))){
+                step=candidate;stepStarted=npc.age;return true;
+            }
         }
         active=false;mining.reset();retryAt=npc.age+100;return false;
     }

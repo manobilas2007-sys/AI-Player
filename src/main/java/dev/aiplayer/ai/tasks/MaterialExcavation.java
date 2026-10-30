@@ -13,7 +13,7 @@ import net.minecraft.util.math.*;
 import java.util.function.Predicate;
 
 /** Shared access to underground ingredients. Observe a cave before opening a
- * supported stair; inspect the rock exposed by real excavation, never ore ESP. */
+ * supported stair; inspect the rock exposed by real excavation, using indexed loaded chunks. */
 public final class MaterialExcavation {
     private final CompanionEntity npc;
     private final ProjectWork work;
@@ -22,7 +22,7 @@ public final class MaterialExcavation {
     private final Predicate<BlockPos> permitted;
     private Item item;
     private int amount,searchTicks,routeStarted;
-    private BlockPos entrance,lastAttempt;
+    private BlockPos entrance,lastAttempt,resourceGoal;
     private boolean active;
     private String status="Procurar acesso ao subsolo";
     public MaterialExcavation(CompanionEntity npc,ProjectWork work,PhysicalMining mining,Predicate<BlockPos> permitted){
@@ -35,6 +35,9 @@ public final class MaterialExcavation {
         :item==Items.RAW_IRON && (s.isOf(Blocks.IRON_ORE)||s.isOf(Blocks.DEEPSLATE_IRON_ORE));}
     public boolean active(){return active;}
     public boolean digging(){return digging.active();}
+    public boolean pickupReady(){return !digging.active() || digging.pickupReady();}
+    public boolean pickupPosition(BlockPos p){return !digging.active() || (permitted.test(p) && digging.pickupPosition(p));}
+    public void pauseForPickup(){digging.pause();}
     public String status(){return status;}
     public String diagnostics(){return "active="+active+" item="+item+" amount="+amount+" entrance="+entrance+" lastAttempt="+lastAttempt+" search="+searchTicks+" corridor={"+digging.diagnostics()+"}";}
     public Item item(){return item;}
@@ -47,10 +50,14 @@ public final class MaterialExcavation {
     public void pause(){digging.pause();survey.pause();}
     public void cancel(){
         if(active)npc.intelligence().restoration().requestReturn();
-        active=false;digging.stop();survey.reset();entrance=null;item=null;searchTicks=0;
+        active=false;digging.stop();survey.reset();entrance=null;resourceGoal=null;item=null;searchTicks=0;
     }
     public void begin(Item requested,int quantity){
         if(active)return;item=requested;amount=quantity;active=true;searchTicks=0;entrance=null;survey.stop();
+    }
+    public void focus(Item requested,int quantity,BlockPos source){
+        if(!active)begin(requested,quantity);
+        if(item==requested)resourceGoal=source.toImmutable();
     }
     public boolean fulfilled(){return active && npc.backpack.count(item)+(npc.getMainHandStack().isOf(item)?npc.getMainHandStack().getCount():0)>=amount;}
     /** Called before parents consume a just-collected ingredient. */
@@ -91,7 +98,7 @@ public final class MaterialExcavation {
         if(lastAttempt!=null && npc.getBlockPos().getSquaredDistance(lastAttempt)<12*12){
             status="Procurar outro trecho de rocha, preservando a escavação anterior";survey.tick(true);return;
         }
-        if(permitted.test(npc.getBlockPos()) && digging.beginStair()){
+        if(permitted.test(npc.getBlockPos()) && (resourceGoal==null?digging.beginStair():digging.beginStairToward(resourceGoal))){
             lastAttempt=npc.getBlockPos().toImmutable();
             npc.intelligence().restoration().begin(npc.getBlockPos());
             status="Abrir escada de acesso ao subsolo";return;
@@ -100,13 +107,14 @@ public final class MaterialExcavation {
         survey.tick(true);
     }
     public void writeNbt(NbtCompound root){
-        NbtCompound n=new NbtCompound();if(lastAttempt!=null)n.putLong("LastAttempt",lastAttempt.asLong());
+        NbtCompound n=new NbtCompound();if(resourceGoal!=null)n.putLong("ResourceGoal",resourceGoal.asLong());if(lastAttempt!=null)n.putLong("LastAttempt",lastAttempt.asLong());
         root.put("MaterialExcavation",n);if(!active)return;n.putString("Item",Registries.ITEM.getId(item).toString());n.putInt("Amount",amount);
         n.putInt("Search",searchTicks);if(entrance!=null)n.putLong("Entrance",entrance.asLong());
         NbtCompound corridor=new NbtCompound();digging.writeNbt(corridor);n.put("Corridor",corridor);root.put("MaterialExcavation",n);
     }
     public void readNbt(NbtCompound root){
         active=false;digging.stop();entrance=null;NbtCompound n=root.getCompound("MaterialExcavation");
+        resourceGoal=n.contains("ResourceGoal")?BlockPos.fromLong(n.getLong("ResourceGoal")):null;
         lastAttempt=n.contains("LastAttempt")?BlockPos.fromLong(n.getLong("LastAttempt")):null;
         Identifier id=Identifier.tryParse(n.getString("Item"));if(id==null)return;
         Item restored=Registries.ITEM.get(id);if(!underground(restored) || n.getInt("Amount")<=0 || n.getInt("Amount")>2048)return;

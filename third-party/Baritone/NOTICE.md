@@ -44,3 +44,12 @@ do mod Baritone enviado pelo usuário não é carregado nem redistribuído como
 se fosse uma implementação de inteligência do NPC.
 
 Alterações para integração com AI Player: AI Player contributors, 2026.
+
+
+0.7.0 adds Minecraft server adaptations in `dev.aiplayer.ai.navigation` of
+PathExecutor/PathingBehavior movement ownership, timeout and revalidation,
+MovementParkour/Pillar execution stages, MovementHelper constraints and
+WorldScanner/MineProcess scanning/candidate memory. These files carry
+LGPL-3.0-or-later attribution and are distributed in the main corresponding
+source JAR. Original reference files and revision are recorded in
+`embedded-baritone/UPSTREAM.md`; original client files are not compiled.

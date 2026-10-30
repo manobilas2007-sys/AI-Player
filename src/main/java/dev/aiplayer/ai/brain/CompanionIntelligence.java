@@ -134,7 +134,7 @@ public final class CompanionIntelligence {
             npc.speech().observe(CompanionSpeech.Event.RECOVERY);
             navigation.reset();return;
         }
-        if(danger || wait || npc.menuOpen())recovery.pause();
+        if(danger || (wait && npc.age-recoveryTick>2) || npc.menuOpen())recovery.pause();
         // An owned bench awaiting retrieval must not starve the last cobblestone
         // needed to finish a tool set. Mining is a real prerequisite for crafting.
         boolean stoneShortage=npc.autoCraft && ResourcePlan.stoneNeeded(npc)>0

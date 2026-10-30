@@ -35,6 +35,8 @@ public final class ProjectWork {
     private final PhysicalMining mining;
     private final dev.aiplayer.ai.navigation.PreparedRoute prepared;
     private boolean routePreparation;
+    private double interactionReach=3.5;
+    private boolean aquaticPlacement;
     private BlockPos goal, stance, boundary, placement;
     private Vec3d point, last;
     private String purpose="", status="Preparar trabalho";
@@ -102,8 +104,8 @@ public final class ProjectWork {
         ServerWorld world=world();
         if(!allowed(feet) || !allowed(feet.up()) || !allowed(feet.down())
                 || hazard(feet) || hazard(feet.up()) || hazard(feet.down())
-                || !world.getFluidState(feet).isEmpty() || !world.getFluidState(feet.up()).isEmpty()
-                || !WorkNavigation.safeWorkFooting(npc,feet))return false;
+                || (!aquaticPlacement && (!world.getFluidState(feet).isEmpty() || !world.getFluidState(feet.up()).isEmpty()))
+                || (!WorkNavigation.safeWorkFooting(npc,feet) && !(aquaticPlacement && world.getFluidState(feet).isIn(net.minecraft.registry.tag.FluidTags.WATER))))return false;
         double half=npc.getWidth()/2.0;
         return world.isSpaceEmpty(npc,new Box(feet.getX()+0.5-half,feet.getY()+0.001,feet.getZ()+0.5-half,
             feet.getX()+0.5+half,feet.getY()+npc.getHeight(),feet.getZ()+0.5+half));
@@ -111,7 +113,7 @@ public final class ProjectWork {
     private boolean inReach(BlockPos target,Vec3d eyes){
         if(!allowed(target))return false;
         Vec3d center=Vec3d.ofCenter(target);
-        if(eyes.squaredDistanceTo(center)>3.5*3.5)return false;
+        if(eyes.squaredDistanceTo(center)>interactionReach*interactionReach)return false;
         var hit=npc.getWorld().raycast(new RaycastContext(eyes,center,RaycastContext.ShapeType.COLLIDER,
             RaycastContext.FluidHandling.NONE,npc));
         return hit.getType()==HitResult.Type.MISS || hit.getBlockPos().equals(target);
@@ -120,7 +122,7 @@ public final class ProjectWork {
         if(!standable(feet))return null;
         Vec3d center=Vec3d.ofBottomCenter(feet);
         double dx=Math.signum(target.getX()-feet.getX())*0.18,dz=Math.signum(target.getZ()-feet.getZ())*0.18;
-        for(Vec3d at:new Vec3d[]{center,center.add(dx,0,dz),center.add(dx,0,0),center.add(0,0,dz)}){
+        for(Vec3d at:new Vec3d[]{center,center.add(dx,0,dz),center.add(dx,0,0),center.add(0,0,dz),center.add(-dx,0,-dz),center.add(-dx,0,0),center.add(0,0,-dz)}){
             double half=npc.getWidth()/2.0;
             Box body=new Box(at.x-half,at.y+0.001,at.z-half,at.x+half,at.y+npc.getHeight(),at.z+half);
             Vec3d eyes=at.add(0,npc.getStandingEyeHeight(),0);
@@ -135,17 +137,23 @@ public final class ProjectWork {
         return null;
     }
     private boolean center(BlockPos feet,Vec3d at){
-        if(at==null || !npc.isOnGround()
-                || !BlockPos.ofFloored(npc.getX(),npc.getY()+0.5,npc.getZ()).equals(feet)
-                || Math.abs(npc.getY()-at.y)>0.12 || !standable(feet))return false;
+        if(at==null || (!npc.isOnGround() && !(aquaticPlacement && npc.isTouchingWater()))
+                || npc.getPos().squaredDistanceTo(at)>2.25
+                || Math.abs(npc.getY()-at.y)>(aquaticPlacement?0.5:0.12) || !standable(feet))return false;
         double dx=at.x-npc.getX(),dz=at.z-npc.getZ(),distance=Math.sqrt(dx*dx+dz*dz);
         if(distance<0.012)return false;
         Box sweep=npc.getBoundingBox().stretch(dx,0,dz);
         for(BlockPos cell:BlockPos.iterate(BlockPos.ofFloored(sweep.minX,sweep.minY+0.001,sweep.minZ),
                 BlockPos.ofFloored(sweep.maxX-0.001,sweep.maxY-0.001,sweep.maxZ-0.001))){
-            if(!allowed(cell) || hazard(cell) || !world().getFluidState(cell).isEmpty())return false;
+            if(!allowed(cell) || hazard(cell) || (!world().getFluidState(cell).isEmpty()
+                    && !(aquaticPlacement && world().getFluidState(cell).isIn(net.minecraft.registry.tag.FluidTags.WATER))))return false;
         }
-        // Both centers are within this same supported feet cell. A grounded
+        if(!aquaticPlacement && !BlockPos.ofFloored(npc.getX(),npc.getY()+0.5,npc.getZ()).equals(feet)){
+            for(BlockPos floor:BlockPos.iterate(BlockPos.ofFloored(sweep.minX,feet.getY()-1,sweep.minZ),
+                    BlockPos.ofFloored(sweep.maxX,feet.getY()-1,sweep.maxZ)))
+                if(!allowed(floor) || !world().getBlockState(floor).isSolidBlock(world(),floor) || hazard(floor))return false;
+        }
+        // Both centers are on verified supported ground. A grounded
         // actor may already overhang the edge of a raised floor; requiring
         // equal-height ground under that existing overhang rejects a safe
         // inward adjustment and leaves a one-node path unable to finish it.
@@ -155,7 +163,7 @@ public final class ProjectWork {
         npc.getNavigation().stop();npc.getMoveControl().moveTo(npc.getX(),npc.getY(),npc.getZ(),0);
         npc.setForwardSpeed(0);npc.setSidewaysSpeed(0);
         double motion=Math.min(0.08,Math.max(0.012,distance*0.4));
-        npc.setVelocity(dx/distance*motion,npc.getVelocity().y,dz/distance*motion);
+        npc.setVelocity(dx/distance*motion,aquaticPlacement?net.minecraft.util.math.MathHelper.clamp((at.y-npc.getY())*0.2,-0.08,0.08):npc.getVelocity().y,dz/distance*motion);
         return true;
     }
     private boolean retaining(BlockPos target,String action){
@@ -169,9 +177,15 @@ public final class ProjectWork {
         if(action.equals("work") && center(candidate.feet(),candidate.point())){
             goal=target.toImmutable();purpose=action;stance=candidate.feet();point=candidate.point();last=npc.getPos();stagnantSince=npc.age;return true;
         }
+        // Swimming needs the shared executor's active steering and ownership;
+        // a terrestrial MobNavigation path alone cannot execute water nodes.
+        if(aquaticPlacement && routePreparation && prepared.begin(candidate.feet(),0)){
+            goal=target.toImmutable();purpose=action;stance=candidate.feet();point=candidate.point();
+            last=npc.getPos();stagnantSince=npc.age;return true;
+        }
         Path path=WorkNavigation.findPath(npc,candidate.feet(),0,
-            dev.aiplayer.ai.navigation.NpcPathfinder.Mode.WORK,this::allowed);
-        if(path==null || !WorkNavigation.surfacePath(npc,path,candidate.feet().getY()))return false;
+            aquaticPlacement?dev.aiplayer.ai.navigation.NpcPathfinder.Mode.WATER:dev.aiplayer.ai.navigation.NpcPathfinder.Mode.WORK,this::allowed);
+        if(path==null || !(aquaticPlacement?path.reachesTarget():WorkNavigation.surfacePath(npc,path,candidate.feet().getY())))return false;
         // Compare long detours with the same local cost graph that accounts
         // for real cutting time and support placement, before committing.
         if(routePreparation && path.getLength()>Math.sqrt(candidate.feet().getSquaredDistance(npc.getBlockPos()))+6
@@ -184,8 +198,11 @@ public final class ProjectWork {
         goal=target.toImmutable();purpose=action;stance=candidate.feet().toImmutable();point=candidate.point();last=npc.getPos();stagnantSince=npc.age;
         return true;
     }
+    public boolean approachMining(BlockPos target){
+        interactionReach=4.5;try{return approach(target);}finally{interactionReach=3.5;}
+    }
     public boolean approach(BlockPos target){
-        if(npc.isTouchingWater() && npc.intelligence().recoverForWork()){status="Sair da água antes de retomar o trabalho";return false;}
+        if(!aquaticPlacement && !prepared.active() && npc.isTouchingWater() && npc.intelligence().recoverForWork()){status="Sair da água antes de retomar o trabalho";return false;}
         if(!validDestination(target)){status="Alvo fora da área autorizada";return false;}
         // A remembered station/site may be outside the currently loaded area.
         // Travel through local terrain; only inspect/interact with it on arrival.
@@ -193,7 +210,7 @@ public final class ProjectWork {
         if(!npc.getBoundingBox().intersects(new Box(target)) && inReach(target,npc.getEyePos())){
             resetRoute();return true;
         }
-        if(!prepared.active() && npc.intelligence().recoverForWork()){status="Sair do bloqueio antes de retomar o trabalho";return false;}
+        if(!prepared.active() && !aquaticPlacement && npc.intelligence().recoverForWork()){status="Sair do bloqueio antes de retomar o trabalho";return false;}
         status="Chegar fisicamente ao local de trabalho";
         if(Math.abs(npc.getBlockX()-target.getX())>30 || Math.abs(npc.getBlockZ()-target.getZ())>30){
             moveTo(target);return false;
@@ -210,13 +227,13 @@ public final class ProjectWork {
         }
         options.sort(Comparator.comparingDouble(candidate->candidate.point().squaredDistanceTo(npc.getPos())));
         for(int i=0;i<Math.min(12,options.size());i++)if(start(target,"work",options.get(i)))return false;
-        if(routePreparation && !options.isEmpty() && prepared.begin(options.get(0).feet(),0)){goal=target.toImmutable();purpose="work";stance=null;status=prepared.status();return false;}
+        if(routePreparation && prepared.begin(options.isEmpty()?target:options.get(0).feet(),options.isEmpty()?1:0)){goal=target.toImmutable();purpose="work";stance=null;status=prepared.status();return false;}
         status="Aguardar caminho seguro até o trabalho";return false;
     }
     /** Routes in local loaded segments. The result means actual arrival at the
      * requested feet cell, never successful calculation of an intermediate path. */
     public boolean moveTo(BlockPos destination){
-        if((!prepared.active() || npc.isTouchingWater()) && npc.intelligence().recoverForWork()){status="Preparar uma saída segura";return false;}
+        if(!prepared.active() && npc.intelligence().recoverForWork()){status="Preparar uma saída segura";return false;}
         if(!validDestination(destination)){status="Destino fora da área autorizada";return false;}
         if(Math.abs(npc.getY()-destination.getY())<0.25
                 && npc.squaredDistanceTo(Vec3d.ofBottomCenter(destination))<0.65){resetRoute();return true;}
@@ -351,7 +368,7 @@ public final class ProjectWork {
             npc.equipMiningTool(state);
             if(!npc.getMainHandStack().isSuitableFor(state)){status="Preciso da ferramenta adequada para este terreno";return false;}
         }
-        if(!approach(pos)){mining.reset();return false;}
+        if(!approachMining(pos)){mining.reset();return false;}
         status="Preparar terreno com quebra e drops reais";
         return mining.tick(pos);
     }
@@ -422,6 +439,23 @@ public final class ProjectWork {
         }
         if(!world().setBlockState(pos,updated,3))return false;
         consume(material,quantity);OwnedBlocks.get(world()).claim(pos,npc.getUuid());placed();return true;
+    }
+    /** Place a paid solid block into water to isolate a quarry face. This is
+     * an ordinary adjacent survival placement, never fluid deletion at range. */
+    public boolean sealWater(BlockPos pos,Item material){
+        if(!(material instanceof net.minecraft.item.BlockItem block) || !rules() || !allowed(pos)
+                || protectedPosition(pos) || world().getBlockEntity(pos)!=null
+                || !world().getFluidState(pos).isIn(net.minecraft.registry.tag.FluidTags.WATER)
+                || !world().getBlockState(pos).getCollisionShape(world(),pos).isEmpty()
+                || count(material)<1 || !attached(pos))return false;
+        if(npc.isSubmergedInWater() && npc.getAir()<150){npc.navigationPlan().cancel();npc.intelligence().recoverForWork();return false;}
+        boolean reached;
+        aquaticPlacement=true;try{reached=approach(pos);}finally{aquaticPlacement=false;}
+        if(!reached || !world().getEntitiesByClass(LivingEntity.class,new Box(pos),LivingEntity::isAlive).isEmpty())return false;
+        if(!delay(pos))return false;
+        if(count(material)<1 || !world().getFluidState(pos).isIn(net.minecraft.registry.tag.FluidTags.WATER))return false;
+        if(!world().setBlockState(pos,block.getBlock().getDefaultState(),3))return false;
+        consume(material,1);OwnedBlocks.get(world()).claim(pos,npc.getUuid());placed();return true;
     }
     /** Doors consume one real item for their two inseparable block states. */
     public boolean placeDoor(BlockPos bottom,BlockState lower,Item material){

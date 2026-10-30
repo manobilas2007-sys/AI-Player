@@ -1,4 +1,4 @@
-# AI Player 0.6.3-dev: Baritone, diálogos e projetos físicos
+# AI Player 0.7.0-dev: Baritone, diálogos e projetos físicos
 
 ## Arquitetura
 
@@ -7,7 +7,7 @@ commit `8c55ad0721d42a01a359834edc16aaa9b5bc587d`, para uma biblioteca interna
 Java 17 em `embedded-baritone/`. O pacote adaptado é
 `dev.aiplayer.baritone`. O build inclui as classes da biblioteca diretamente
 no JAR principal do AI Player. O módulo de fontes e seu binário separado
-mantêm a versão `1.10.5-npc.1`, mas não são registrados como outro mod
+mantêm a versão `1.10.5-npc.2`, mas não são registrados como outro mod
 Fabric em tempo de execução. O usuário não precisa instalar esse módulo
 nem o mod Baritone separadamente. Fabric API e FallingTree 4.3.4 continuam
 sendo as dependências utilizadas pelo AI Player.
@@ -44,8 +44,8 @@ base do projeto. A integração não utiliza Minecraft 1.21.3.
 | Objetivos de navegação | `GoalBlock` e `GoalNear` são usados pelo adaptador; a biblioteca também disponibiliza objetivos X/Z, nível Y, combinação e afastamento. |
 | Custos de ações | Preservam as fórmulas upstream de tempo e gravidade para comparar movimentos e rotas. |
 | Estado e regras do mundo | Fornecidos por `NpcPathfinder`, no servidor, sem assumir um jogador cliente conectado. |
-| Movimentação | O adaptador calcula rotas de caminhada, diagonais, subida, descida e água; os movimentos continuam físicos e são revalidados. |
-| Mineração e colocação | Permanecem nos executores do AI Player, com verificações de inventário, ferramentas, propriedade e regras do mundo. A busca de rotas não quebra nem coloca blocos por conta própria. |
+| Movimentação | `NpcNavigation` coordena caminhada, diagonais, saltos com arco validado, escadas existentes, natação, saídas da água, quedas limitadas, pontes e pilares pagos. `PreparedRoute` revalida ações, custos e progresso. |
+| Mineração e colocação | O grafo compara caminhos comuns com passagens preparadas; o executor abre passagem e coloca apoios usando ferramentas e inventário reais. A coleta mantém a escada de retorno, trata gravidade/água e recolhe os drops fisicamente. |
 | Fabricação e troca de ferramentas | Continuam nos executores do AI Player; o planejador não materializa recursos. |
 | Abrigo, plantio e exploração | Implementados em `CompanionTasks`, que solicita rotas e executa ações físicas com recursos reais. São controladores do NPC, distintos dos processos do jogador cliente Baritone. |
 | Mixins, comandos e renderização do cliente Baritone | Não são incorporados ao runtime do NPC. |
@@ -87,7 +87,7 @@ o trabalho atual.
 O novo modelo tem piso de 5×7, paleta de madeira escolhida uma vez e persistida,
 cinco janelas de vidro, porta real de duas metades, telhado inclinado com escadas
 e lajes, bancada e fornalha internas. Prepara neve, vegetação e terreno natural
-com quebras físicas e fundações limitadas a quatro blocos. Construções marcadas
+com levantamento das colunas, escolha da altura, quebras físicas de cima para baixo e fundações pagas até o apoio natural, sem o antigo limite fixo de quatro blocos. Construções marcadas
 como protegidas, blocos de outros NPCs e inventários são preservados.
 
 O executor mantém alcance, linha de visão, apoio e colisão reais. Blocos colocados
@@ -217,12 +217,18 @@ conserva seus próprios direitos. O estado específico de compilação e
 GameTests de cada revisão deve ser consultado no workflow correspondente;
 este documento não declara testes executados sem o respectivo resultado.
 
-## Cobertura de regressão desta integração
+## Cobertura e critérios de entrega da 0.7.0
 
-Os 104 GameTests anteriores permanecem no projeto. A versão 0.6 acrescenta
-cenários de terreno, porta, paleta, construção completa, materiais reais,
-fornalha, balde reutilizado, agricultura existente, limite de 100 blocos e
-prioridade de alimento. O diálogo tem testes locais de sinônimos, erros de
-escrita, confirmação, recusa, expiração, proprietário, dimensão e origem.
-Os resultados executados de cada revisão devem ser consultados no Actions;
-este documento não declara testes concluídos antes do respectivo relatório.
+A suíte contém 374 nomes distintos: 185 preservados e 189 novos. A ampliação cobre 45 cenários de movimento, 30 de árvores/FallingTree, 31 de pedreiras e restauração, 30 de terreno/construção, 28 de lotes/receitas e 25 de memória/viagens. Os grupos críticos são repetidos nas sementes 17, 104729 e 8675309, em mundos isolados.
+
+`tools/verify_gametest_suite.py` verifica os nomes exatos, ausência de omissões/falhas, todas as sementes e uma única revisão de fontes. A execução completa e os testes de produção Fabric 0.15.11 e 0.20.0 são necessários para gerar o pacote `VALIDADO`. Consulte o relatório da revisão; a existência dos testes no código não declara que uma execução passou.
+
+## Adaptações adicionais do executor
+
+Os fontes de referência de PathExecutor, PathingBehavior, MovementParkour, MovementPillar, MovementHelper, CalculationContext, WorldScanner e MineProcess estão preservados em `embedded-baritone/upstream`. A correspondência com os controladores do NPC está em `embedded-baritone/UPSTREAM.md`.
+
+O índice de recursos varre seções residentes com orçamento compartilhado de 1.024 células por tick, mantém posições e regiões visitadas por dimensão e revalida blocos antes de interagir. O deslocamento em segmentos usa os tickets móveis já existentes; não há limite de viagem atrelado ao jogador. O índice não carrega remotamente todos os chunks do mundo.
+
+Lotes distinguem mínimo para a próxima ação, quantidade planejada e entrega. Uma dependência antiga salva conserva sua quantidade. Um lote parcial é usado quando acaba a varredura local e não há outra fonte acessível conhecida; uma obra com muitos recursos disponíveis continua coletando em lote. NBT de materiais versão 3 lê as versões anteriores; caminhos em andamento são recalculados após carregar.
+
+A interação aquática é autorizada para conter água com blocos reais e exige alcance, espaço livre, propriedade e ar suficiente. Gravidade não permite entrar sob blocos caindo. Elytra, portais/interdimensões e importação de esquemas arbitrários não fazem parte desta entrega. A validação cobre os cenários nomeados, sem prometer uma rota global ótima através de terreno desconhecido.

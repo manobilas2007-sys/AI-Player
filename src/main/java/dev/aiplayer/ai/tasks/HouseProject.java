@@ -38,6 +38,7 @@ public final class HouseProject {
     private HouseBlueprint.Palette palette;
     private Phase phase=Phase.DONE;
     private int cursor,placed;
+    private SiteTerrainPlan terrainPlan;
     private String dimension="",status="Sem abrigo em construção";
 
     public HouseProject(CompanionEntity npc,ProjectWork work,ProjectMaterials materials){
@@ -114,7 +115,7 @@ public final class HouseProject {
     }
     public void pause(){work.pause();materials.pause();npc.clearWorkingVisual();}
     public void cancel(){
-        active=false;anchor=null;palette=null;phase=Phase.DONE;cursor=0;placed=0;
+        active=false;anchor=null;palette=null;terrainPlan=null;phase=Phase.DONE;cursor=0;placed=0;
         work.cancel();materials.cancel();status="Construção cancelada; blocos concluídos preservados";
     }
     private boolean own(ServerWorld world,BlockPos pos){return OwnedBlocks.get(world).owned(pos,npc.getUuid());}
@@ -168,7 +169,7 @@ public final class HouseProject {
         return true;
     }
     private BlockPos foundationSupport(ServerWorld world,BlockPos top){
-        for(int depth=0;depth<4;depth++){
+        for(int depth=0;top.getY()-depth>world.getBottomY();depth++){
             BlockPos pos=top.down(depth);
             if(!loaded(world,pos))return null;
             BlockState state=world.getBlockState(pos);
@@ -185,15 +186,19 @@ public final class HouseProject {
                 status="Obstáculo não removível na fundação";return null;
             }
         }
-        status="Desnível maior que quatro blocos; preciso de outro ponto para o abrigo";return null;
+        status="Não encontrei apoio sólido para esta fundação";return null;
     }
     private void survey(ServerWorld world){
-        for(BlockPos pos:HouseBlueprint.clearance(anchor))if(!checkClearCell(world,pos))return;
+        if(terrainPlan==null){
+            terrainPlan=SiteTerrainPlan.survey(world,anchor,5,7,5);if(terrainPlan==null)return;
+            anchor=terrainPlan.floor();reserveTerrain();
+        }
+        for(BlockPos pos:clearance())if(!checkClearCell(world,pos))return;
         for(BlockPos top:HouseBlueprint.foundation(anchor))if(foundationSupport(world,top)==null)return;
         phase=Phase.CLEAR;cursor=0;status="Preparar terreno: retirar neve, vegetação e desníveis naturais";
     }
     private void clear(ServerWorld world){
-        List<BlockPos> cells=HouseBlueprint.clearance(anchor);
+        List<BlockPos> cells=clearance();
         while(cursor<cells.size() && world.isChunkLoaded(cells.get(cursor)) && world.getBlockState(cells.get(cursor)).isAir())cursor++;
         if(cursor>=cells.size()){phase=Phase.FOUNDATION;cursor=0;return;}
         BlockPos pos=cells.get(cursor);
@@ -223,7 +228,7 @@ public final class HouseProject {
                 status="Retirar vegetação e neve sob a fundação";
                 work.clearNatural(gap);return;
             }
-            if(!materials.ensure(Items.COBBLESTONE,1)){status=materials.status();return;}
+            if(!materials.ensureForProject(Items.COBBLESTONE,1)){status=materials.status();return;}
             status="Firmar fundação real do abrigo";
             work.place(gap,Blocks.COBBLESTONE.getDefaultState(),Items.COBBLESTONE,1);return;
         }
@@ -260,7 +265,7 @@ public final class HouseProject {
             materials.preferFurnace(HouseBlueprint.furnace(anchor));
             materials.preferWorkbench(HouseBlueprint.workbench(anchor));
         }
-        if(!materials.ensure(part.item(),1)){status=materials.status();return;}
+        if(!materials.ensureForProject(part.item(),1)){status=materials.status();return;}
         status="Construir abrigo de "+palette.id()+": "+cursor+"/"+plan.size();
         boolean result=part.door()?work.placeDoor(part.position(),part.state(),part.item())
             :work.place(part.position(),part.state(),part.item(),1);
@@ -293,30 +298,59 @@ public final class HouseProject {
         }
         // Keep a material trip in charge until its real prerequisite exists.
         // Only then may inspecting an unloaded site route the NPC back home.
+        updateDemand(world);
         if(!materials.resumePending()){status=materials.status();return;}
         switch(phase){case SURVEY->survey(world);case CLEAR->clear(world);case FOUNDATION->foundations(world);
             case BUILD->build(world);case EXIT->exit(world);case DONE->{active=false;}}
     }
+    private List<BlockPos> clearance(){
+        if(terrainPlan==null)return HouseBlueprint.clearance(anchor);
+        var cells=new java.util.ArrayList<>(terrainPlan.clearance(5,7,1,1));
+        for(int y=2;y>=0;y--)cells.add(anchor.add(2,y,-2));
+        return cells;
+    }
+    private void updateDemand(ServerWorld world){
+        var remaining=new java.util.LinkedHashMap<Item,Integer>();
+        if(phase==Phase.BUILD){
+            var parts=HouseBlueprint.plan(anchor,palette);
+            for(int i=cursor;i<parts.size();i++){
+                var part=parts.get(i);if(!matches(world,part))remaining.merge(part.item(),1,Integer::sum);
+            }
+        }else if(phase==Phase.FOUNDATION){
+            int fill=0;
+            for(BlockPos top:HouseBlueprint.foundation(anchor)){
+                if(!world.isChunkLoaded(top))return; // retain the saved bill during a distant trip
+                for(BlockPos p=top;p.getY()>world.getBottomY() && !world.getBlockState(p).isSolidBlock(world,p);p=p.down()){
+                    if(!world.getFluidState(p).isEmpty())break;
+                    fill++;
+                }
+            }
+            if(fill>0)remaining.put(Items.COBBLESTONE,fill);
+        }
+        materials.demand(remaining);
+    }
     public void writeNbt(NbtCompound root){
-        NbtCompound n=new NbtCompound();n.putInt("Version",1);n.putBoolean("Active",active);
+        NbtCompound n=new NbtCompound();n.putInt("Version",2);n.putBoolean("Active",active);
+        if(terrainPlan!=null)n.putInt("ClearTop",terrainPlan.clearTop());
         n.putString("Dimension",dimension);n.putString("Phase",phase.name());n.putInt("Index",cursor);n.putInt("Placed",placed);
         if(anchor!=null)n.putLong("Anchor",anchor.asLong());if(palette!=null)n.putString("Wood",palette.id());
         n.putString("Status",status);root.put("DetailedHouse",n);
     }
     public void readNbt(NbtCompound root){
-        active=false;anchor=null;palette=null;phase=Phase.DONE;cursor=0;placed=0;
+        active=false;anchor=null;palette=null;terrainPlan=null;phase=Phase.DONE;cursor=0;placed=0;
         if(!root.contains("DetailedHouse"))return;
         NbtCompound n=root.getCompound("DetailedHouse");
-        if(!n.getBoolean("Active") || n.getInt("Version")!=1)return;
+        if(!n.getBoolean("Active") || n.getInt("Version")<1 || n.getInt("Version")>2)return;
         dimension=n.getString("Dimension");
         if(!dimension.equals(npc.getWorld().getRegistryKey().getValue().toString()))return;
         palette=HouseBlueprint.palette(n.getString("Wood"));if(palette==null || !n.contains("Anchor"))return;
         anchor=BlockPos.fromLong(n.getLong("Anchor"));
+        if(n.contains("ClearTop"))terrainPlan=new SiteTerrainPlan(anchor,Math.max(anchor.getY()+4,Math.min(npc.getWorld().getTopY()-1,n.getInt("ClearTop"))));
         if(!npc.getWorld().getWorldBorder().contains(anchor) || npc.getWorld().isOutOfHeightLimit(anchor)){
             status="Abrigo fora da área válida";return;
         }
         try{phase=Phase.valueOf(n.getString("Phase"));}catch(IllegalArgumentException invalid){return;}
-        cursor=Math.max(0,Math.min(512,n.getInt("Index")));placed=Math.max(0,Math.min(512,n.getInt("Placed")));
+        cursor=Math.max(0,Math.min(32768,n.getInt("Index")));placed=Math.max(0,Math.min(512,n.getInt("Placed")));
         status=n.getString("Status");active=phase!=Phase.DONE;
         materials.selectWood(palette.log(),palette.planks());
         reserveTerrain();

@@ -43,6 +43,7 @@ public final class PhysicalMining {
         }
         if(OwnedBlocks.get(world).protectedBlock(pos) || (OwnedBlocks.get(world).claimed(pos) && !OwnedBlocks.get(world).owned(pos,npc.getUuid()))){reset();return false;}
         BlockState state = world.getBlockState(pos);
+        if(state.isIn(net.minecraft.registry.tag.BlockTags.LOGS))npc.treeHarvest().observe(pos);
         float hardness = state.getHardness(world, pos);
         if (state.isAir() || hardness < 0 || world.getBlockEntity(pos) != null) { reset(); return false; }
         if (!pos.equals(target) || !state.equals(original) || npc.age - lastTick > 1) {

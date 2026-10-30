@@ -88,13 +88,13 @@ public final class NpcPathfinder {
         if(!(npc.getWorld() instanceof ServerWorld world))return 0;
         return PER_TICK_NODES-remaining(npc,world,world.getTime());
     }
-    private static int remaining(CompanionEntity npc,ServerWorld world,long now){
+    static int remaining(CompanionEntity npc,ServerWorld world,long now){
         synchronized(BUDGETS){
             Budget b=BUDGETS.get(npc);
             return b!=null && b.world()==world && b.at()==now?Math.max(0,PER_TICK_NODES-b.used()):PER_TICK_NODES;
         }
     }
-    private static void charge(CompanionEntity npc,ServerWorld world,long now,int count){
+    static void charge(CompanionEntity npc,ServerWorld world,long now,int count){
         synchronized(BUDGETS){
             Budget b=BUDGETS.get(npc);
             int prior=b!=null && b.world()==world && b.at()==now?b.used():0;

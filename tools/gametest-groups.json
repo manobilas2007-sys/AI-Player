@@ -1,0 +1,54 @@
+{
+  "original": [
+    "CompanionTests",
+    "SurfaceMiningTests",
+    "WorldRegressionTests",
+    "ExcavationTests",
+    "FallingTreeTests"
+  ],
+  "projects": [
+    "BaritoneNavigationTests",
+    "CompanionTaskTests",
+    "FarmProjectTests",
+    "FoodAutonomyTests",
+    "HouseProjectTests",
+    "OwnedDoorNavigationTests",
+    "ProjectMaterialsTests",
+    "ProjectWorkTests",
+    "ProjectBootstrapTests",
+    "ProjectArbitrationTests",
+    "RemoteProjectTests"
+  ],
+  "travel": [
+    "CompanionChunkLoadingTests",
+    "LongRangeResourceTests",
+    "HouseNaturalTerrainTests",
+    "ManualResourceSurveyTests",
+    "ResourceAccessTests"
+  ],
+  "trees_materials": [
+    "TreeProjectRegressionTests",
+    "MaterialBatchRegressionTests"
+  ],
+  "movement": [
+    "MovementExecutionTests"
+  ],
+  "memory": [
+    "ResourceMemoryJourneyTests"
+  ],
+  "terrain": [
+    "TerrainConstructionRegressionTests"
+  ],
+  "quarries": [
+    "QuarryExcavationRegressionTests"
+  ],
+  "critical": [
+    "MovementExecutionTests",
+    "TreeProjectRegressionTests",
+    "QuarryExcavationRegressionTests",
+    "TerrainConstructionRegressionTests",
+    "ResourceMemoryJourneyTests",
+    "ProjectBootstrapTests",
+    "MaterialBatchRegressionTests"
+  ]
+}

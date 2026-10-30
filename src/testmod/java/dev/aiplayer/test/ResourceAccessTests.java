@@ -24,6 +24,9 @@ public final class ResourceAccessTests implements FabricGameTest {
             c.setBlockState(new BlockPos(x,0,z),Blocks.STONE);
             if(x!=5 && x!=6)c.setBlockState(new BlockPos(x,3,z),Blocks.STONE);
         }
+        // A low ceiling rules out jumping: this scenario specifically
+        // requires constructing the two real supports before crossing.
+        for(int x=4;x<=7;x++)for(int z=3;z<=7;z++)c.setBlockState(new BlockPos(x,6,z),Blocks.STONE);
         CompanionEntity npc=worker(c,new BlockPos(3,4,5));npc.backpack.setStack(0,new ItemStack(Items.DIRT,2));
         BlockPos goal=c.getAbsolutePos(new BlockPos(9,4,5));
         PreparedRoute route=new PreparedRoute(npc,p->p.getZ()==goal.getZ() && p.getY()>=goal.getY()-2);
@@ -165,6 +168,7 @@ public final class ResourceAccessTests implements FabricGameTest {
             c.setBlockState(new BlockPos(x,0,z),Blocks.STONE);
             if(x!=5 && x!=6)c.setBlockState(new BlockPos(x,3,z),Blocks.STONE);
         }
+        for(int x=4;x<=7;x++)for(int z=3;z<=7;z++)c.setBlockState(new BlockPos(x,6,z),Blocks.STONE);
         c.setBlockState(new BlockPos(3,4,4),Blocks.DIRT);c.setBlockState(new BlockPos(2,4,4),Blocks.DIRT);
         // Pickup can leave the worker on its remaining source of soil. Start
         // there deliberately so leaving that perch is tested every run.

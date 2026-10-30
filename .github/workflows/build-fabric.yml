@@ -1,11 +1,6 @@
 name: Build AI Player Fabric 1.20.1
 on:
   workflow_dispatch:
-    inputs:
-      run_gametests:
-        description: Executar testes dentro do Minecraft
-        type: boolean
-        default: true
   push:
     branches: [main, master]
   pull_request:
@@ -44,16 +39,13 @@ jobs:
           Path('SOURCE_REVISION.txt').write_text(f'Repository: https://github.com/{repo}\nCommit: {revision}\nSource: https://github.com/{repo}/tree/{revision}\nBaritone upstream: 8c55ad0721d42a01a359834edc16aaa9b5bc587d\n')
           PYCODE
       - name: Test packaged mod on production Fabric 0.20.0
-        run: python3 tools/run_packaged_runtime_smoke.py --mod-jar build/libs/ai-player-0.6.3-dev.jar --smoke-jar build/runtime-smoke/ai-player-runtime-smoke.jar --fallingtree-jar libs/FallingTree-1.20.1-4.3.4.jar --loader 0.20.0 --work-dir build/packaged-runtime-0.20.0
+        run: python3 tools/run_packaged_runtime_smoke.py --mod-jar build/libs/ai-player-0.7.0-dev.jar --smoke-jar build/runtime-smoke/ai-player-runtime-smoke.jar --fallingtree-jar libs/FallingTree-1.20.1-4.3.4.jar --loader 0.20.0 --work-dir build/packaged-runtime-0.20.0
       - name: Test packaged mod on production Fabric 0.15.11
-        run: python3 tools/run_packaged_runtime_smoke.py --mod-jar build/libs/ai-player-0.6.3-dev.jar --smoke-jar build/runtime-smoke/ai-player-runtime-smoke.jar --fallingtree-jar libs/FallingTree-1.20.1-4.3.4.jar --loader 0.15.11 --work-dir build/packaged-runtime-0.15.11
-      - name: Run Minecraft regression suite
-        if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || inputs.run_gametests }}
-        run: bash gradlew runGametest --no-daemon
+        run: python3 tools/run_packaged_runtime_smoke.py --mod-jar build/libs/ai-player-0.7.0-dev.jar --smoke-jar build/runtime-smoke/ai-player-runtime-smoke.jar --fallingtree-jar libs/FallingTree-1.20.1-4.3.4.jar --loader 0.15.11 --work-dir build/packaged-runtime-0.15.11
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AI-Player-v0.6.3-resource-access-build-and-tests
+          name: AI-Player-v0.7.0-build
           path: |
             build/libs/ai-player-*.jar
             embedded-baritone/build/libs/*.jar
@@ -71,3 +63,73 @@ jobs:
             build/packaged-runtime-*/smoke-*.txt
             build/packaged-runtime-*/server-output.log
           if-no-files-found: warn
+
+  gametests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - {group: original, seed: 17}
+          - {group: projects, seed: 17}
+          - {group: travel, seed: 17}
+          - {group: trees_materials, seed: 17}
+          - {group: movement, seed: 17}
+          - {group: memory, seed: 17}
+          - {group: terrain, seed: 17}
+          - {group: quarries, seed: 17}
+          - {group: critical, seed: 17}
+          - {group: critical, seed: 104729}
+          - {group: critical, seed: 8675309}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run isolated GameTest group and verify exact names
+        run: python3 tools/run_gametest_group.py --group ${{ matrix.group }} --seed ${{ matrix.seed }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GameTests-${{ matrix.group }}-${{ matrix.seed }}
+          path: |
+            build/gametest/*/manifest.json
+            build/gametest/*/reports/
+            build/gametest/*/logs/latest.log
+          if-no-files-found: error
+
+  verified-package:
+    needs: [build, gametests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: GameTests-*
+          path: validation
+          merge-multiple: true
+      - name: Verify all 374 unique tests and three critical seeds
+        run: python3 tools/verify_gametest_suite.py validation
+      - uses: actions/download-artifact@v4
+        with:
+          name: AI-Player-v0.7.0-build
+          path: package
+      - name: Include validated report and checksums
+        run: |
+          cp -r validation package/validation
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import hashlib
+          root = Path('package')
+          files = sorted(p for p in root.rglob('*.jar') if p.is_file())
+          (root/'SHA256SUMS.txt').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root)}\n' for p in files))
+          PYCODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AI-Player-v0.7.0-VALIDADO-JAR-fontes-374-GameTests
+          path: package/
+          if-no-files-found: error

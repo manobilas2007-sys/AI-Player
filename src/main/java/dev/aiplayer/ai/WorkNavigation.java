@@ -4,6 +4,7 @@ import dev.aiplayer.entity.CompanionEntity;
 import dev.aiplayer.ai.navigation.NpcPathfinder;
 import net.minecraft.entity.ai.pathing.Path;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import net.minecraft.util.hit.HitResult;
@@ -149,10 +150,21 @@ public final class WorkNavigation {
             }
             if(best!=null)break;
         }
-        if(best==null){npc.getNavigation().stop();return false;}
+        if(best==null){
+            if(npc.navigationPlan().prepared())return true;
+            for(Direction side:Direction.Type.HORIZONTAL){
+                BlockPos feet=new BlockPos(target.getX(),groundY,target.getZ()).offset(side);
+                if(npc.navigationPlan().request(feet,p->true,true))return true;
+            }
+            npc.getNavigation().stop();return false;
+        }
         return npc.getNavigation().startMovingAlong(best,speed);
     }
     public static boolean moveToDrop(CompanionEntity npc, net.minecraft.entity.ItemEntity drop, double speed) {
+        return moveToDrop(npc,drop,speed,p->true);
+    }
+    public static boolean moveToDrop(CompanionEntity npc, net.minecraft.entity.ItemEntity drop, double speed,
+                                    java.util.function.Predicate<BlockPos> allowed) {
         // Search reachable contact positions when the item's exact cell is
         // blocked. Pickup still requires physical proximity and clear sight.
         BlockPos center=drop.getBlockPos();
@@ -165,7 +177,7 @@ public final class WorkNavigation {
             var hit=npc.getWorld().raycast(new RaycastContext(at.add(0,npc.getStandingEyeHeight(),0),
                 drop.getPos().add(0,0.1,0),RaycastContext.ShapeType.COLLIDER,RaycastContext.FluidHandling.NONE,npc));
             if(hit.getType()!=HitResult.Type.MISS)continue;
-            Path path=findPath(npc,feet,0,waterRoute?NpcPathfinder.Mode.WATER:NpcPathfinder.Mode.WORK);
+            Path path=findPath(npc,feet,0,waterRoute?NpcPathfinder.Mode.WATER:NpcPathfinder.Mode.WORK,allowed);
             if(!(waterRoute ? safePath(npc,path,Math.min(npc.getBlockY(),drop.getBlockY())-3)
                     : surfacePath(npc,path,feet.getY())))continue;
             var end=path.getEnd();
