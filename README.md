@@ -1,28 +1,71 @@
-# AI Player v0.5.1-dev — Baritone adaptado ao NPC
+# AI Player v0.7.0-dev — navegação e projetos autônomos
+
+A versão 0.7.0 amplia a navegação física do NPC com saltos, escadas, natação, saídas da água, quedas controladas e colocação de apoios. O planejamento e a execução compartilham o controle do movimento e recalculam caminhos quando o terreno muda ou o progresso trava. Recursos ficam registrados por dimensão, incluindo blocos ocultos nos chunks carregados pelo próprio NPC durante as viagens.
+
+Os projetos calculam os materiais restantes e coletam em lotes. FallingTree também é usado na madeira destinada à construção. Quando os recursos conhecidos acabam, um lote parcial utilizável pode retornar à obra, preservando sua quantidade após salvar. Pedreiras tratam colunas de areia, contenção de água e recolhimento físico dos drops.
+
+A suíte contém **378 GameTests distintos**, incluindo os **185 anteriores**. Os cenários críticos são repetidos em mundos novos com sementes **17, 104729 e 8675309**; repetições não aumentam a contagem de cobertura. O artefato do Actions com `VALIDADO` no nome só é disponibilizado depois da aprovação de todos os grupos, do build e dos testes dos JARs em dois carregadores Fabric.
+
 
 Minecraft Java **1.20.1**, Fabric, Java 17 e Gradle Wrapper 8.7.
 
-O planejador A*, objetivos e custos adaptados do Baritone 1.10.5 são compilados a partir dos fontes em `embedded-baritone/`. Suas classes são incluídas diretamente no JAR principal do AI Player, sem depender do carregamento de outro JAR pelo Fabric. **Não é necessário instalar Baritone separadamente.** O NPC usa o mundo do servidor e seu inventário real; não controla o jogador do cliente.
+A versão 0.6.3 acrescenta acesso físico ao subsolo: procura entradas de caverna, compara desvios com passagens abertas em terreno natural e prepara apoios com blocos reais. Sem acesso natural adequado, abre uma escada para procurar pedra, carvão e ferro. Ao sair, fecha com terra somente as aberturas da superfície e conserva o túnel; esse retorno também é preservado ao cancelar ou salvar o trabalho. A recuperação de água e buracos passa a funcionar durante os projetos.
 
-A versão 0.5.1-dev altera esse empacotamento após o relato de `NoClassDefFoundError: dev/aiplayer/baritone/Goal` no FCL. A biblioteca continua com fontes e build separados para modificação e recompilação. A execução no FCL ainda precisa ser conferida; os resultados de compilação, empacotamento e GameTests pertencem ao workflow da revisão correspondente.
+A versão 0.6.2 prepara grama e neve também sob a fundação em terrenos desnivelados. O NPC mantém chunks ao seu redor enquanto trabalha, avança em busca de recursos distantes e conserva o projeto quando está longe da obra.
 
-## Comandos novos
+Converse com seu NPC pelo chat normal. O interpretador local aceita sinônimos, acentos e pequenos erros de escrita; não precisa de chave de API nem serviço de IA externo.
 
-- `/aiplayer construir abrigo` ou **construa um abrigo**: constrói um abrigo de madeira 5×5, com piso, paredes, porta aberta e teto. Usa 80 tábuas reais; pode converter troncos e obter madeira quando a fabricação automática está habilitada.
-- `/aiplayer plantar` ou **plante trigo**: prepara até nove solos naturais próximos de água, planta e colhe apenas trigo maduro. Entregue sementes de trigo; a enxada pode ser fornecida ou fabricada com materiais reais.
-- `/aiplayer explorar` ou **explore a área**: visita oito pontos próximos seguros em terreno carregado e lembra recursos visíveis.
-- `/aiplayer cancelar` ou **cancele o projeto**: cancela o trabalho atual.
-- `/aiplayer status`: mostra atividade e progresso.
+A versão 0.6.1 corrige o início de projetos sem materiais: troncos acessíveis cercados por grama entram na busca, a vegetação é removida antes de colocar estações e o projeto controla suas receitas e ferramentas. Os ingredientes do machado ficam reservados até a fabricação terminar, antes de retomar a obra. Os testes completos de abrigo e plantação começam com inventário e mão vazios, usando recursos naturais próximos, e exigem a fabricação e o uso real do machado.
 
-As ordens anteriores de madeira, pedra e comida permanecem disponíveis. Combate, alimentação, inventário aberto, troca de machado e recuperação de apoios continuam sob o mesmo coordenador. Construções protegidas e blocos de outros proprietários são preservados. Projetos e progresso são salvos no mundo; rotas são recalculadas e não atravessam dimensões.
+O retorno à obra permite ajustar a posição na beirada do piso já construído. Picaretas gastas não satisfazem a necessidade de uma ferramenta utilizável, e recuperar uma bancada já quebrada não interrompe uma expedição de pedra em andamento.
+
+Para fundir materiais, o NPC obtém primeiro a matéria-prima e o combustível, depois retorna à fornalha. Inserir ingredientes, alimentar a fornalha e retirar o produto continuam exigindo acesso físico à estação.
+
+O ferro necessário ao balde é reunido para uma carga da fornalha. As tentativas de recolher um drop são acompanhadas por material, permitindo desistir de um item inacessível mesmo quando ele faz parte de uma receita com várias dependências.
+
+Um bloco já observado continua sendo um destino conhecido ao retomar a coleta. O tempo sem progresso conta apenas as tentativas ativas, sem incluir pausas para fabricar, fundir ou abrir o inventário.
+
+## Exemplos de diálogo
+
+- **“Construa uma casa”**: o NPC apresenta os modelos disponíveis. Nesta versão existe o abrigo de madeira detalhado. Após escolher, ele confirma o local e a madeira antes de começar.
+- **“Faça um abrigo de pinheiro”**: propõe a obra com uma única espécie de madeira, prepara o terreno natural e busca os materiais que faltarem.
+- **“Crie uma plantação”**: propõe uma plantação irrigada com borda, canteiros e água. Usa um balde reutilizado, planta as sementes disponíveis e volta a seguir o dono ao terminar.
+- **“Cuide da plantação”**: após sua confirmação, cuida dos canteiros existentes em um raio horizontal de 100 blocos do local da ordem, incluindo terra que você já arou. Colhe plantas maduras e replanta com sementes reais.
+- **“Plante trigo”**: pergunta se você quer criar uma plantação ou cuidar de uma existente.
+- **“Ache comida”**: prioriza a caça de animais adequados, preservando animais nomeados, presos por laço ou marcados como persistentes.
+- **“Me siga”**, **“pare a tarefa”** e **“o que você está fazendo?”**: controlam e consultam o trabalho pelo diálogo.
+
+Responda **“sim”** ou **“pode começar”** para autorizar a proposta; **“não”** descarta a proposta. A confirmação fica vinculada ao dono, ao NPC, à dimensão e ao local original da ordem e expira. O NPC só anuncia modelos realmente disponíveis.
+
+## Trabalho no mundo
+
+O abrigo possui piso de 5×7, madeira consistente, janelas de vidro, porta, telhado com escadas e lajes, bancada e fornalha. A preparação mede as colunas do terreno, escolhe uma altura de piso no local confirmado, remove vegetação e neve e executa cortes e fundações até o apoio natural, consumindo blocos reais. Construções protegidas, inventários e blocos de outros NPCs são preservados. Água ou lava no local da casa e ausência de apoio sólido continuam impedindo uma fundação segura.
+
+Todos os blocos e ingredientes são reais. A busca de materiais preserva o solo reservado à própria obra, e todo o canal de irrigação precisa estar preparado antes de receber água. Ao trocar de projeto, o NPC prepara estações de trabalho locais. O planejador pode procurar madeira da espécie selecionada, pedra, areia, ferro e combustível em terreno acessível que vai sendo carregado ao caminhar, fabricar componentes e usar uma fornalha vanilla. O ferro do balde e o vidro precisam ser obtidos e processados; nenhuma tarefa cria materiais ou sementes gratuitamente. Sem uma rota ou recurso acessível, o status explica a necessidade pendente.
+
+As ordens diretas de madeira, comida e pedra podem buscar recursos além da área do jogador. A busca de pedra procura acesso físico a uma caverna e pode abrir uma escada quando necessário. O NPC mantém uma região móvel de chunks enquanto trabalha, incluindo a atualização de entidades e fornalhas; ao terminar o trabalho e a restauração pendente, ou remover o NPC, seus tickets são liberados. Trabalhos salvos podem retomar no último chunk após reabrir o mundo. Crescimento aleatório de plantas continua seguindo as regras vanilla.
+
+A exploração passou a fazer parte da observação e das caminhadas curtas da autonomia. As tarefas novas não precisam dos antigos comandos de construir, plantar ou explorar. As ordens anteriores de madeira, pedra e comida continuam disponíveis no chat. Projetos antigos de 0.5.x continuam legíveis para que obras já salvas não sejam descartadas.
 
 ## Instalação e desenvolvimento
 
-Use o JAR principal de `build/libs/` com Fabric API e FallingTree 4.3.4, como nas versões anteriores. A biblioteca interna do Baritone já está dentro dele. Edite os arquivos Java diretamente neste repositório; o ZIP r7 permanece preservado.
+Substitua o JAR antigo do AI Player pelo JAR principal de `build/libs/`, mantendo Fabric API e FallingTree 4.3.4. As classes do núcleo adaptado do Baritone estão diretamente dentro do AI Player, preservando a correção de carregamento da versão 0.5.1. O binário separado de `embedded-baritone/build/libs/` serve para inspeção e recompilação e não vai na pasta `mods`.
 
 ```sh
 ./gradlew clean :embedded-baritone:build build compileTestmodJava runGametest --no-daemon
 python3 tools/check_embedded_baritone.py
 ```
 
-O GitHub Actions publica o mod, FallingTree, relatórios, o binário separado da biblioteca, JARs de fontes e instruções de recompilação da biblioteca LGPL. Esse binário separado permite inspecionar e recompilar o componente; ele não é um mod adicional e não vai na pasta `mods`. O JAR principal já contém suas classes. Os detalhes da adaptação e sua matriz de capacidades estão em [docs/INTEGRACAO_BARITONE.md](docs/INTEGRACAO_BARITONE.md); os avisos estão em [LICENSE.md](LICENSE.md) e `third-party/Baritone/`.
+O workflow compila os arquivos do repositório, verifica o JAR distribuído, testa navegação/combate em servidores Fabric 0.20.0 e 0.15.11 e executa os GameTests. Consulte o resultado da revisão no Actions; este texto não declara uma execução no Android/Fold Craft Launcher.
+
+O ZIP r7 original permanece preservado. Proveniência e licenças estão em [LICENSE.md](LICENSE.md), `third-party/Baritone/` e [docs/INTEGRACAO_BARITONE.md](docs/INTEGRACAO_BARITONE.md).
+
+
+Para reproduzir a validação isolada do CI:
+
+```sh
+python3 tools/run_gametest_group.py --group quarries --seed 17
+python3 tools/run_gametest_group.py --group critical --seed 104729
+```
+
+Os grupos estão em `tools/gametest-groups.json`. Cada execução usa outro diretório de mundo; `tools/verify_gametest_suite.py` exige todos os nomes esperados, todas as sementes e a mesma revisão de fontes, rejeitando falhas, testes omitidos ou contagens duplicadas. O teste de sementes pertence somente ao mod de testes e não é incluído no JAR jogável.

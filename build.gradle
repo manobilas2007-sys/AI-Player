@@ -2,7 +2,7 @@ plugins {
     id 'fabric-loom' version '1.6.12'
     id 'maven-publish'
 }
-version = '0.5.1-dev'
+version = '0.7.0-dev'
 group = 'dev.aiplayer'
 base { archivesName = 'ai-player' }
 repositories { mavenCentral() }
@@ -39,7 +39,8 @@ loom {
             source sourceSets.testmod
             vmArg '-Dfabric-api.gametest'
             vmArg '-Dfabric-api.gametest.report-file=reports/gametest-results.xml'
-            runDir 'run-gametest'
+            vmArg '-Daiplayer.gametest.seed=' + providers.gradleProperty('scenarioSeed').getOrElse('0')
+            runDir providers.gradleProperty('gametestRunDir').getOrElse('run-gametest')
         }
     }
 }
@@ -103,4 +104,21 @@ tasks.register('remapRuntimeSmokeJar', net.fabricmc.loom.task.RemapJarTask) {
     archiveFileName = 'ai-player-runtime-smoke.jar'
     destinationDirectory = layout.buildDirectory.dir('runtime-smoke')
     addNestedDependencies = false
+}
+
+// Select test entrypoints in generated resources; source manifests stay complete.
+tasks.named('processTestmodResources') {
+    def selection = providers.gradleProperty('gameTestClasses').getOrElse('')
+    inputs.property('gameTestClasses', selection)
+    doLast {
+        if (selection) {
+            def file = new File(destinationDir, 'fabric.mod.json')
+            def metadata = new groovy.json.JsonSlurper().parse(file)
+            def names = selection.tokenize(',') as Set
+            def selected = metadata.entrypoints.'fabric-gametest'.findAll { names.contains(it.tokenize('.').last()) }
+            if (selected.size() != names.size()) throw new GradleException("Unknown/duplicate GameTest class selection: " + selection)
+            metadata.entrypoints.'fabric-gametest' = selected
+            file.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(metadata))
+        }
+    }
 }

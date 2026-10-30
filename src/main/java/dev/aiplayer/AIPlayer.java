@@ -4,6 +4,7 @@ import dev.aiplayer.entity.CompanionEntity;
 import dev.aiplayer.screen.CompanionMenu;
 import dev.aiplayer.mixin.MobGoalsAccess;
 import dev.aiplayer.commands.PortugueseOrderParser;
+import dev.aiplayer.commands.CompanionDialogue;
 import dev.aiplayer.ai.ResourceGathering;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.minecraft.text.Text;
@@ -37,17 +38,11 @@ public class AIPlayer implements ModInitializer {
     public static Identifier id(String path) { return new Identifier("aiplayer", path); }
     private static CompanionEntity nearestOwned(net.minecraft.server.network.ServerPlayerEntity player){
         return player.getWorld().getEntitiesByClass(CompanionEntity.class,player.getBoundingBox().expand(48),
-            npc->npc.isAlive() && npc.isOwner(player)).stream()
+            npc->npc.isAlive() && npc.isOwner(player) && npc.squaredDistanceTo(player)<=48*48).stream()
             .min(Comparator.comparingDouble(player::squaredDistanceTo)).orElse(null);
     }
-    private static int startProject(net.minecraft.server.command.ServerCommandSource source,
-            dev.aiplayer.ai.tasks.CompanionTasks.Kind kind) throws com.mojang.brigadier.exceptions.CommandSyntaxException{
-        var player=source.getPlayerOrThrow();var npc=nearestOwned(player);
-        if(npc==null){player.sendMessage(Text.literal("[AI Player] Seu NPC precisa estar a até 48 blocos."),false);return 0;}
-        npc.tasks().start(kind);
-        player.sendMessage(Text.literal("[AI Player] "+npc.tasks().status()),false);return 1;
-    }
     @Override public void onInitialize() {
+        dev.aiplayer.ai.navigation.CompanionChunkLoading.initialize();
         net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.AFTER.register((world,player,pos,state,blockEntity)->{
             if(world instanceof net.minecraft.server.world.ServerWorld server)dev.aiplayer.ai.OwnedBlocks.get(server).playerBroke(pos);
         });
@@ -62,13 +57,6 @@ public class AIPlayer implements ModInitializer {
                     if(npc!=null)player.sendMessage(Text.literal("[AI Player] "+npc.intelligence().status()),false);
                     return npc==null?0:1;
                 }))
-                .then(net.minecraft.server.command.CommandManager.literal("construir")
-                    .then(net.minecraft.server.command.CommandManager.literal("abrigo").executes(context->startProject(
-                        context.getSource(),dev.aiplayer.ai.tasks.CompanionTasks.Kind.BUILD_SHELTER))))
-                .then(net.minecraft.server.command.CommandManager.literal("plantar").executes(context->startProject(
-                    context.getSource(),dev.aiplayer.ai.tasks.CompanionTasks.Kind.FARM)))
-                .then(net.minecraft.server.command.CommandManager.literal("explorar").executes(context->startProject(
-                    context.getSource(),dev.aiplayer.ai.tasks.CompanionTasks.Kind.EXPLORE)))
                 .then(net.minecraft.server.command.CommandManager.literal("cancelar").executes(context->{
                     var npc=nearestOwned(context.getSource().getPlayerOrThrow());
                     if(npc==null)return 0;
@@ -78,25 +66,13 @@ public class AIPlayer implements ModInitializer {
         FabricDefaultAttributeRegistry.register(COMPANION, CompanionEntity.attributes());
         // Offline Portuguese commands sent as ordinary chat; no API key or remote AI required.
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, parameters) -> {
-            var order=PortugueseOrderParser.parse(message.getContent().getString());
-            if(order.action()==PortugueseOrderParser.Action.NONE)return;
-            CompanionEntity npc=sender.getWorld().getEntitiesByClass(CompanionEntity.class,
-                    sender.getBoundingBox().expand(48),c->c.isAlive() && c.isOwner(sender))
-                    .stream().min(Comparator.comparingDouble(sender::squaredDistanceTo)).orElse(null);
-            if(npc==null){sender.sendMessage(Text.literal("[AI Player] Seu NPC precisa estar a até 48 blocos para ouvir."),false);return;}
-            switch(order.action()){
-                case CANCEL -> {npc.tasks().cancel();npc.gathering().cancel();}
-                case BUILD_SHELTER -> npc.tasks().start(dev.aiplayer.ai.tasks.CompanionTasks.Kind.BUILD_SHELTER);
-                case FARM -> npc.tasks().start(dev.aiplayer.ai.tasks.CompanionTasks.Kind.FARM);
-                case EXPLORE -> npc.tasks().start(dev.aiplayer.ai.tasks.CompanionTasks.Kind.EXPLORE);
-                case WOOD,STONE,FOOD -> {
-                    npc.tasks().cancel();
-                    npc.gathering().start(order.action()==PortugueseOrderParser.Action.WOOD
-                        ?ResourceGathering.Kind.WOOD:order.action()==PortugueseOrderParser.Action.STONE
-                        ?ResourceGathering.Kind.STONE:ResourceGathering.Kind.FOOD,order.amount(),true);
-                }
-                default -> { }
-            }
+            String raw=message.getContent().getString();
+            CompanionEntity npc=nearestOwned(sender);
+            // Replies such as "sim", "abrigo" and a wood species belong to
+            // the pending conversation even though they are not new orders.
+            if(npc!=null){CompanionDialogue.handle(raw,sender,npc);return;}
+            if(PortugueseOrderParser.parse(raw).action()!=PortugueseOrderParser.Action.NONE)
+                sender.sendMessage(Text.literal("[AI Player] Seu NPC precisa estar a até 48 blocos para ouvir."),false);
         });
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.SPAWN_EGGS).register(e -> e.add(EGG));
         AttackEntityCallback.EVENT.register((player, world, hand, target, hit) -> {

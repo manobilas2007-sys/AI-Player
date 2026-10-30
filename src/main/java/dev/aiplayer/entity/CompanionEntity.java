@@ -48,6 +48,15 @@ public class CompanionEntity extends PathAwareEntity implements ExtendedScreenHa
     public boolean autoSurvive = true;
     public boolean autoLoot = true;
     public boolean autoCraft = true;
+    private final dev.aiplayer.ai.navigation.ResourceIndex resourceIndex=new dev.aiplayer.ai.navigation.ResourceIndex(this);
+    public dev.aiplayer.ai.navigation.ResourceIndex resourceIndex(){return resourceIndex;}
+    private final dev.aiplayer.ai.navigation.NpcNavigation navigationPlan=new dev.aiplayer.ai.navigation.NpcNavigation(this);
+    public dev.aiplayer.ai.navigation.NpcNavigation navigationPlan(){return navigationPlan;}
+    @Override protected net.minecraft.entity.ai.pathing.EntityNavigation createNavigation(World world){
+        return new dev.aiplayer.ai.navigation.CompanionNavigation(this,world);
+    }
+    private final TreeHarvestSession treeHarvest=new TreeHarvestSession(this);
+    public TreeHarvestSession treeHarvest(){return treeHarvest;}
     private final dev.aiplayer.ai.brain.CompanionIntelligence intelligence=new dev.aiplayer.ai.brain.CompanionIntelligence(this);
     public dev.aiplayer.ai.brain.CompanionIntelligence intelligence(){return intelligence;}
     public SurvivalController survival(){return survival;}
@@ -84,7 +93,10 @@ public class CompanionEntity extends PathAwareEntity implements ExtendedScreenHa
         super.initDataTracker(); dataTracker.startTracking(OWNER, Optional.empty()); dataTracker.startTracking(MODE,0); dataTracker.startTracking(EATING,false);dataTracker.startTracking(WORKING,false);dataTracker.startTracking(ATTACK_TICKS,0);dataTracker.startTracking(INTERACTION,0);dataTracker.startTracking(INTERACTION_TICKS,0);
     }
     @Override protected void initGoals() {
-        goalSelector.add(0,new SwimGoal(this));
+        goalSelector.add(0,new SwimGoal(this){
+            @Override public boolean canStart(){return super.canStart() && (navigationPlan==null || !navigationPlan.controlsSwimming());}
+            @Override public boolean shouldContinue(){return canStart();}
+        });
         goalSelector.add(1,new CompanionGoal(this));
         goalSelector.add(8,new LookAtEntityGoal(this,PlayerEntity.class,8));
         goalSelector.add(9,new LookAroundGoal(this));
@@ -93,7 +105,7 @@ public class CompanionEntity extends PathAwareEntity implements ExtendedScreenHa
     public boolean isOwner(PlayerEntity player) { return player.getUuid().equals(ownerId()); }
     public PlayerEntity owner() { return ownerId()==null?null:getWorld().getPlayerByUuid(ownerId()); }
     public Mode mode() { return Mode.fromId(dataTracker.get(MODE)); }
-    public void setMode(Mode mode) { dataTracker.set(MODE,mode.ordinal()); setTarget(null); getNavigation().stop(); }
+    public void setMode(Mode mode) { if(navigationPlan!=null)navigationPlan.cancel();dataTracker.set(MODE,mode.ordinal()); setTarget(null); getNavigation().stop(); }
     public boolean menuOpen() { return viewers > 0; }
     public boolean isEating() { return dataTracker.get(EATING); }
     public void setEatingVisual(boolean eating) { dataTracker.set(EATING,eating); }
@@ -145,6 +157,8 @@ public class CompanionEntity extends PathAwareEntity implements ExtendedScreenHa
         if(!getWorld().isClient && isAlive()) {
             if(age-lastWorkTick>2 || getTarget()!=null || menuOpen() || isEating())dataTracker.set(WORKING,false);
             intelligence.tick();
+            navigationPlan.tick();
+            dev.aiplayer.ai.navigation.OwnedDoorNavigation.tick(this);
         }
     }
     public void optimizeEquipment() {
@@ -236,7 +250,7 @@ public class CompanionEntity extends PathAwareEntity implements ExtendedScreenHa
             NbtCompound item=new NbtCompound(); item.putByte("Slot",(byte)i); backpack.getStack(i).writeNbt(item); items.add(item);
         }
         nbt.putString("WorkDimension",getWorld().getRegistryKey().getValue().toString());
-        nbt.put("Backpack",items); gathering.writeNbt(nbt); crafting.writeNbt(nbt); tasks.writeNbt(nbt);intelligence.write(nbt);survival.writeNbt(nbt);speech.write(nbt);nbt.putInt("AIPlayerDataVersion",6);
+        nbt.put("Backpack",items); gathering.writeNbt(nbt); crafting.writeNbt(nbt); tasks.writeNbt(nbt);intelligence.write(nbt);survival.writeNbt(nbt);speech.write(nbt);treeHarvest.write(nbt);navigationPlan.write(nbt);resourceIndex.write(nbt);nbt.putInt("AIPlayerDataVersion",7);
     }
     @Override public void readCustomDataFromNbt(NbtCompound nbt) {
         super.readCustomDataFromNbt(nbt);
@@ -253,7 +267,7 @@ public class CompanionEntity extends PathAwareEntity implements ExtendedScreenHa
         if(!nbt.contains("WorkDimension") || nbt.getString("WorkDimension").equals(getWorld().getRegistryKey().getValue().toString())){
             gathering.readNbt(nbt);crafting.readNbt(nbt);tasks.readNbt(nbt);
         } else {gathering.readNbt(new NbtCompound());crafting.readNbt(new NbtCompound());tasks.readNbt(new NbtCompound());}
-        intelligence.read(nbt);survival.readNbt(nbt);speech.read(nbt);
+        intelligence.read(nbt);survival.readNbt(nbt);speech.read(nbt);treeHarvest.read(nbt);navigationPlan.read(nbt);resourceIndex.read(nbt);
     }
     @Override public void writeScreenOpeningData(ServerPlayerEntity player,PacketByteBuf buf) { buf.writeInt(getId()); }
     @Override public ScreenHandler createMenu(int syncId,PlayerInventory inv,PlayerEntity player) { return new CompanionMenu(syncId,inv,this); }

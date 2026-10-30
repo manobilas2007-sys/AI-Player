@@ -8,12 +8,12 @@ public class ProjectOrderParserTest {
         checks++;
     }
     public static void main(String[] args){
-        check("construa um abrigo de madeira",BUILD_SHELTER);
-        check("construir uma casa",BUILD_SHELTER);
+        check("construa um abrigo de madeira",BUILD_HOUSE);
+        check("construir uma casa",BUILD_HOUSE);
         check("plante trigo",FARM);
         check("cultive uma plantação de trigo",FARM);
-        check("explore a área",EXPLORE);
-        check("explorar",EXPLORE);
+        check("explore a área",NONE);
+        check("explorar",NONE);
         check("cancele o projeto",CANCEL);
         check("cancelar a exploração",CANCEL);
         check("não construa abrigo",NONE);

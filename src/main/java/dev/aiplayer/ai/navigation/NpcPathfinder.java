@@ -88,13 +88,13 @@ public final class NpcPathfinder {
         if(!(npc.getWorld() instanceof ServerWorld world))return 0;
         return PER_TICK_NODES-remaining(npc,world,world.getTime());
     }
-    private static int remaining(CompanionEntity npc,ServerWorld world,long now){
+    static int remaining(CompanionEntity npc,ServerWorld world,long now){
         synchronized(BUDGETS){
             Budget b=BUDGETS.get(npc);
             return b!=null && b.world()==world && b.at()==now?Math.max(0,PER_TICK_NODES-b.used()):PER_TICK_NODES;
         }
     }
-    private static void charge(CompanionEntity npc,ServerWorld world,long now,int count){
+    static void charge(CompanionEntity npc,ServerWorld world,long now,int count){
         synchronized(BUDGETS){
             Budget b=BUDGETS.get(npc);
             int prior=b!=null && b.world()==world && b.at()==now?b.used():0;
@@ -168,7 +168,7 @@ public final class NpcPathfinder {
                             || (!world.getFluidState(key.up()).isEmpty() && !water(key.up())))return false;
                     if((water(key) || water(key.up())) && npc.getAir()<150)return false;
                 } else if(!world.getFluidState(key).isEmpty() || !world.getFluidState(key.up()).isEmpty())return false;
-                return !world.getBlockCollisions(npc,body(key)).iterator().hasNext();
+                return OwnedDoorNavigation.collisionFree(npc,world,body(key));
             });
         }
         boolean standable(BlockPos p){
@@ -198,7 +198,7 @@ public final class NpcPathfinder {
                         || actor.maxZ<=support.minZ+0.0001 || actor.minZ>=support.maxZ-0.0001)continue;
                 double x=feet.getX()+0.5-npc.getX(),z=feet.getZ()+0.5-npc.getZ();
                 Box centered=actor.stretch(x,0,z);
-                if(!loaded(centered) || world.getBlockCollisions(npc,centered).iterator().hasNext())continue;
+                if(!loaded(centered) || !OwnedDoorNavigation.collisionFree(npc,world,centered))continue;
                 boolean safe=true;
                 for(BlockPos cell:BlockPos.iterate(BlockPos.ofFloored(centered.minX,centered.minY,centered.minZ),
                         BlockPos.ofFloored(centered.maxX,centered.maxY,centered.maxZ))){
@@ -227,7 +227,7 @@ public final class NpcPathfinder {
                 for(int level=0;level>=dy;level--)if(!bodyClear(new BlockPos(to.getX(),from.getY()+level,to.getZ())))return false;
             }
             Box crossing=body(dy>0?from.up():from).stretch(dx,0,dz);
-            return loaded(crossing) && !world.getBlockCollisions(npc,crossing).iterator().hasNext();
+            return loaded(crossing) && OwnedDoorNavigation.collisionFree(npc,world,crossing);
         }
         Iterable<Step> neighbors(Position position){
             BlockPos from=block(position);List<Step> choices=new ArrayList<>(14);

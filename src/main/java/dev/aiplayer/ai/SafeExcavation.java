@@ -25,20 +25,39 @@ public final class SafeExcavation {
     private final CompanionEntity npc;
     private final PhysicalMining miner;
     private Shape shape;
-    private BlockPos origin;
+    private BlockPos origin,resourceGoal;
     private Direction direction, side;
     private int depth, slot, stepStarted, lastRoute, emptySteps, pausedAt=-1;
     private boolean foundStone;
+    private String rejection="",lastStop="";
+    public String lastStop(){return lastStop;}
     private int initialTargetDepth=1;
     private static final int MAX_STAIR=10, MAX_GALLERY=12;
+    private java.util.function.Predicate<BlockPos> permission=p->true;
+    private java.util.function.Predicate<BlockState> resource=s->s.isOf(Blocks.STONE);
+    private java.util.function.Consumer<BlockPos> removed=p->{};
+    private boolean prospecting;
+    public void configure(java.util.function.Predicate<BlockPos> permission, java.util.function.Predicate<BlockState> resource, java.util.function.Consumer<BlockPos> removed){
+        this.permission=permission;this.resource=resource;this.removed=removed;prospecting=true;
+    }
 
     public SafeExcavation(CompanionEntity npc,PhysicalMining miner){this.npc=npc;this.miner=miner;}
     public boolean active(){return shape!=null;}
     public Shape shape(){return shape;}
-    public void stop(){shape=null;origin=null;miner.reset();npc.getNavigation().stop();}
+    /** Pickup is a separate stage at a completed, supported step. Do not let
+     * a drop put the worker on a future block the stair still needs to cut. */
+    public boolean pickupReady(){return active() && (slot==0 || slot>=slots()) && npc.isOnGround();}
+    public boolean pickupPosition(BlockPos p){
+        if(!active())return true;
+        int forward=(p.getX()-origin.getX())*direction.getOffsetX()+(p.getZ()-origin.getZ())*direction.getOffsetZ();
+        int completed=slot>=slots()?depth:depth-1;
+        return permission.test(p) && forward<=completed;
+    }
+    public String diagnostics(){return "lastStop="+lastStop+" "+shape+" origin="+origin+" direction="+direction+" depth="+depth+" slot="+slot+" stepAge="+(npc.age-stepStarted);}
+    public void stop(){shape=null;origin=null;resourceGoal=null;miner.reset();npc.getNavigation().stop();}
     public void pause(){if(pausedAt<0)pausedAt=npc.age;miner.reset();}
     public void resume(){if(pausedAt>=0){stepStarted+=npc.age-pausedAt;pausedAt=-1;}}
-    private boolean loaded(BlockPos pos){return npc.getWorld().isChunkLoaded(pos)
+    private boolean loaded(BlockPos pos){return permission.test(pos) && npc.getWorld().isChunkLoaded(pos)
         && pos.getY()>npc.getWorld().getBottomY()+3 && pos.getY()<npc.getWorld().getTopY()-3;}
     private boolean solid(BlockPos p){return loaded(p) && npc.getWorld().getBlockState(p).isSolidBlock(npc.getWorld(),p);}
     /** Natural hard rock may obstruct a stone gallery. Mine it physically with the
@@ -53,7 +72,7 @@ public final class SafeExcavation {
     private boolean clearable(BlockPos p){
         if(!(npc.getWorld() instanceof ServerWorld w) || !loaded(p))return false;
         BlockState s=w.getBlockState(p);
-        if(!allowed(s) || !w.getFluidState(p).isEmpty() || !w.getFluidState(p.up()).isEmpty()
+        if((!allowed(s) && !(prospecting && resource.test(s))) || !w.getFluidState(p).isEmpty() || !w.getFluidState(p.up()).isEmpty()
                 || w.getBlockState(p.up()).getBlock() instanceof FallingBlock)return false;
         if(s.isAir())return true;
         if(w.getBlockEntity(p)!=null || OwnedBlocks.get(w).protectedBlock(p)
@@ -62,11 +81,19 @@ public final class SafeExcavation {
             BlockPos neighbor=p.offset(d);
             if(!loaded(neighbor) || !w.getFluidState(neighbor).isEmpty())return false;
         }
-        // Never remove the current footing, including the supporting block
-        // immediately next to a partially overhanging player hitbox.
-        return !new Box(p).intersects(npc.getBoundingBox().expand(0.02,0,0.02))
+        // Never remove the current footing or a block containing an actor.
+        // Mere face contact with a wall is not intersection: the worker must
+        // be able to mine the next step while standing against its face.
+        return !new Box(p).intersects(npc.getBoundingBox().contract(0.001,0,0.001))
                 && !p.equals(npc.getBlockPos().down())
-                && w.getEntitiesByClass(LivingEntity.class,new Box(p), e->e!=npc && e.isAlive()).isEmpty();
+                && !supportsNpc(p)
+                && w.getEntitiesByClass(LivingEntity.class,new Box(p).stretch(0,1,0), e->e!=npc && e.isAlive()).isEmpty();
+    }
+    private boolean supportsNpc(BlockPos p){
+        Box body=npc.getBoundingBox();
+        return npc.isOnGround() && Math.abs(npc.getY()-(p.getY()+1))<0.05
+            && body.maxX>p.getX()+0.001 && body.minX<p.getX()+0.999
+            && body.maxZ>p.getZ()+0.001 && body.minZ<p.getZ()+0.999;
     }
     private BlockPos floorAt(int step, int lane){
         BlockPos p=origin.offset(direction,step);
@@ -75,17 +102,17 @@ public final class SafeExcavation {
     }
     private BlockPos cell(int step,int s){
         BlockPos p=origin.offset(direction,step);
-        if(shape==Shape.STAIR)return s==0?p.down(step-1):p.down(step);
+        if(shape==Shape.STAIR)return p.down(step).up(2-s);
         if(s>=2)p=p.offset(side);
         return p.up((s%2==0)?1:0);
     }
     private BlockPos foot(int step){return shape==Shape.STAIR?origin.offset(direction,step).down(step):origin.offset(direction,step);}
-    private int slots(){return shape==Shape.STAIR?2:4;}
+    private int slots(){return shape==Shape.STAIR?3:4;}
     private boolean safeStep(int step){
-        if(!solid(floorAt(step,0)) || (shape==Shape.GALLERY && !solid(floorAt(step,1))))return false;
+        if(!solid(floorAt(step,0)) || (shape==Shape.GALLERY && !solid(floorAt(step,1)))){rejection="unsupported floor "+floorAt(step,0);return false;}
         BlockPos p=foot(step);
-        if(!loaded(p) || !loaded(p.up()) || !WorkNavigation.safeWorkFooting(npc,p))return false;
-        for(int s=0;s<slots();s++)if(!clearable(cell(step,s)))return false;
+        if(!loaded(p) || !loaded(p.up()) || !WorkNavigation.safeWorkFooting(npc,p)){rejection="unsafe footing "+p;return false;}
+        for(int s=0;s<slots();s++)if(!clearable(cell(step,s))){rejection="unclearable "+cell(step,s)+" npc="+npc.getPos();return false;}
         return true;
     }
     private boolean begin(Shape mode,BlockPos base,Direction face,Direction secondary){
@@ -145,35 +172,58 @@ public final class SafeExcavation {
         }
         return false;
     }
+    public boolean beginStairToward(BlockPos resource){
+        if(active())return true;
+        BlockPos base=npc.getBlockPos();
+        int dx=resource.getX()-base.getX(),dz=resource.getZ()-base.getZ();
+        Direction preferred=Math.abs(dx)>=Math.abs(dz)?(dx>=0?Direction.EAST:Direction.WEST):(dz>=0?Direction.SOUTH:Direction.NORTH);
+        for(Direction face:new Direction[]{preferred,preferred.rotateYClockwise(),preferred.rotateYCounterclockwise(),preferred.getOpposite()})
+            if(begin(Shape.STAIR,base,face,null)){resourceGoal=resource.toImmutable();return true;}
+        return false;
+    }
     public Result tick(){
         if(!active())return Result.FINISHED;
         resume();
-        if(npc.age-stepStarted>180){stop();return Result.BLOCKED;}
-        if(depth>(shape==Shape.STAIR?MAX_STAIR:MAX_GALLERY)) {stop();return Result.FINISHED;}
-        if(!safeStep(depth)){stop();return Result.BLOCKED;}
+        if(npc.age-stepStarted>180){lastStop="step timeout at "+foot(depth)+" npc="+npc.getPos();stop();return Result.BLOCKED;}
+        if(depth>(shape==Shape.STAIR?(prospecting?npc.getWorld().getHeight():MAX_STAIR):(prospecting?24:MAX_GALLERY))) {stop();return Result.FINISHED;}
+        if(!safeStep(depth)){lastStop=rejection;stop();return Result.BLOCKED;}
         while(slot<slots()){
             BlockPos p=cell(depth,slot);
             if(npc.getWorld().getBlockState(p).isAir()){slot++;continue;}
             if(!miner.reachable(p)){
-                if(npc.age-stepStarted>80){stop();return Result.BLOCKED;}
+                // A one-wide stair hides the second lane behind its corner.
+                // Walk into the already opened first lane before trying to
+                // mine sideways; waiting at the stair mouth cannot gain sight.
+                if(shape==Shape.GALLERY && slot>=2
+                        && npc.getWorld().getBlockState(foot(depth)).isAir()
+                        && npc.getWorld().getBlockState(foot(depth).up()).isAir()){
+                    moveInto(foot(depth));
+                }
+                if(npc.age-stepStarted>80){lastStop="reach timeout "+p+" npc="+npc.getPos();stop();return Result.BLOCKED;}
                 return Result.BUSY;
             }
-            boolean stone=npc.getWorld().getBlockState(p).isOf(Blocks.STONE);
+            boolean stone=resource.test(npc.getWorld().getBlockState(p));
+            boolean rock=npc.getWorld().getBlockState(p).isOf(Blocks.STONE) || npc.getWorld().getBlockState(p).isOf(Blocks.DEEPSLATE);
             if(miner.tick(p)){
-                slot++;stepStarted=npc.age;
+                removed.accept(p.toImmutable());slot++;stepStarted=npc.age;
+                if(prospecting && rock && shape==Shape.STAIR)foundStone=true;
                 if(stone){emptySteps=0;if(shape==Shape.STAIR)foundStone=true;}
                 return stone?Result.STONE_MINED:Result.PROGRESSED;
             }
             return Result.BUSY;
         }
         BlockPos destination=foot(depth);
-        if(npc.getPos().squaredDistanceTo(Vec3d.ofBottomCenter(destination))<0.65
-                && Math.abs(npc.getY()-destination.getY())<0.75){
-            if(shape==Shape.STAIR && foundStone){
+        if(npc.isOnGround() && npc.getPos().squaredDistanceTo(Vec3d.ofBottomCenter(destination))<0.65
+                && Math.abs(npc.getY()-destination.getY())<0.12){
+            if(shape==Shape.STAIR && foundStone && (resourceGoal==null || destination.getY()<=resourceGoal.getY())){
                 // At the first natural stone layer, switch from descending steps
                 // to a two-high/two-wide horizontal gallery. The stairs behind
                 // remain intact and can be walked back up.
                 origin=destination.toImmutable();shape=Shape.GALLERY;
+                if(resourceGoal!=null){
+                    int dx=resourceGoal.getX()-origin.getX(),dz=resourceGoal.getZ()-origin.getZ();
+                    direction=Math.abs(dx)>=Math.abs(dz)?(dx>=0?Direction.EAST:Direction.WEST):(dz>=0?Direction.SOUTH:Direction.NORTH);
+                }
                 side=direction.rotateYClockwise();depth=1;slot=0;
                 stepStarted=npc.age;lastRoute=0;emptySteps=0;foundStone=false;initialTargetDepth=1;
                 if(!safeStep(1)){stop();return Result.FINISHED;}
@@ -182,11 +232,15 @@ public final class SafeExcavation {
             // Allow short natural diorite/granite seams without changing tunnel
             // direction. Stop after four consecutive stone-free columns so we
             // do not drill endlessly through irrelevant material.
-            if(shape==Shape.GALLERY && depth>=initialTargetDepth && ++emptySteps>=4){stop();return Result.FINISHED;}
+            if(shape==Shape.GALLERY && depth>=initialTargetDepth && ++emptySteps>=(prospecting?24:4)){stop();return Result.FINISHED;}
             depth++;slot=0;stepStarted=npc.age;lastRoute=0;
             return Result.PROGRESSED;
         }
-        if(npc.age>=lastRoute+18){
+        moveInto(destination);
+        return Result.BUSY;
+    }
+    private void moveInto(BlockPos destination){
+        if(npc.age>=lastRoute+10 || npc.getNavigation().isIdle()){
             lastRoute=npc.age;
             // The destination has a verified real floor. Path to the newly
             // excavated cell, and use the normal motion controller if vanilla
@@ -196,6 +250,25 @@ public final class SafeExcavation {
             else if(npc.getBlockPos().getManhattanDistance(destination)<=3)
                 npc.getMoveControl().moveTo(destination.getX()+0.5,destination.getY(),destination.getZ()+0.5,0.9);
         }
-        return Result.BUSY;
+    }
+
+    public void writeNbt(net.minecraft.nbt.NbtCompound n){
+        if(!active())return;
+        if(resourceGoal!=null)n.putLong("ResourceGoal",resourceGoal.asLong());
+        n.putString("Shape",shape.name());n.putLong("Origin",origin.asLong());
+        n.putString("Direction",direction.getName());if(side!=null)n.putString("Side",side.getName());
+        n.putInt("Depth",depth);n.putInt("Slot",slot);n.putInt("EmptySteps",emptySteps);
+        n.putBoolean("FoundStone",foundStone);n.putInt("InitialDepth",initialTargetDepth);
+    }
+    public void readNbt(net.minecraft.nbt.NbtCompound n){
+        stop();if(!n.contains("Origin"))return;
+        try{shape=Shape.valueOf(n.getString("Shape"));}catch(IllegalArgumentException invalid){return;}
+        direction=Direction.byName(n.getString("Direction"));side=Direction.byName(n.getString("Side"));
+        if(direction==null || direction.getAxis().isVertical() || (shape==Shape.GALLERY && (side==null || side.getAxis().isVertical()))){stop();return;}
+        origin=BlockPos.fromLong(n.getLong("Origin"));depth=Math.max(1,Math.min(npc.getWorld().getHeight(),n.getInt("Depth")));
+        if(n.contains("ResourceGoal"))resourceGoal=BlockPos.fromLong(n.getLong("ResourceGoal"));
+        slot=Math.max(0,Math.min(slots(),n.getInt("Slot")));emptySteps=Math.max(0,n.getInt("EmptySteps"));
+        foundStone=n.getBoolean("FoundStone");initialTargetDepth=Math.max(1,Math.min(4,n.getInt("InitialDepth")));
+        stepStarted=npc.age;lastRoute=0;pausedAt=-1;
     }
 }

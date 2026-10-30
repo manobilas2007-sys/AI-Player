@@ -33,7 +33,7 @@ public final class FallingTreeBridge {
     private record Cut(BlockPos pos, BlockState state, List<ItemStack> drops) {}
 
     public static boolean tryFell(CompanionEntity npc, BlockPos hit) {
-        if(!(npc.getWorld() instanceof ServerWorld world) || !npc.gathering().isNaturalTreeLog(hit)
+        if(!(npc.getWorld() instanceof ServerWorld world) || !npc.treeHarvest().observe(hit)
                 || !world.getGameRules().getBoolean(GameRules.DO_MOB_GRIEFING)
                 || !world.getGameRules().getBoolean(GameRules.DO_TILE_DROPS))return false;
         ItemStack tool=npc.getMainHandStack();
@@ -63,7 +63,7 @@ public final class FallingTreeBridge {
             var ownership=OwnedBlocks.get(world);
             for(var part:parts) {
                 var q=part.blockPos();BlockPos pos=new BlockPos(q.getX(),q.getY(),q.getZ());
-                if(!world.isChunkLoaded(pos) || !npc.gathering().isNaturalTreeLog(pos)
+                if(!world.isChunkLoaded(pos) || !npc.treeHarvest().contains(pos)
                         || ownership.protectedBlock(pos) || ownership.claimed(pos)
                         || world.getBlockEntity(pos)!=null || !world.getFluidState(pos).isEmpty())return false;
                 BlockState state=world.getBlockState(pos);

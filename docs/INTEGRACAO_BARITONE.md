@@ -1,4 +1,4 @@
-# AI Player 0.5.1-dev: Baritone adaptado ao NPC
+# AI Player 0.7.0-dev: Baritone, diálogos e projetos físicos
 
 ## Arquitetura
 
@@ -7,7 +7,7 @@ commit `8c55ad0721d42a01a359834edc16aaa9b5bc587d`, para uma biblioteca interna
 Java 17 em `embedded-baritone/`. O pacote adaptado é
 `dev.aiplayer.baritone`. O build inclui as classes da biblioteca diretamente
 no JAR principal do AI Player. O módulo de fontes e seu binário separado
-mantêm a versão `1.10.5-npc.1`, mas não são registrados como outro mod
+mantêm a versão `1.10.5-npc.2`, mas não são registrados como outro mod
 Fabric em tempo de execução. O usuário não precisa instalar esse módulo
 nem o mod Baritone separadamente. Fabric API e FallingTree 4.3.4 continuam
 sendo as dependências utilizadas pelo AI Player.
@@ -44,8 +44,8 @@ base do projeto. A integração não utiliza Minecraft 1.21.3.
 | Objetivos de navegação | `GoalBlock` e `GoalNear` são usados pelo adaptador; a biblioteca também disponibiliza objetivos X/Z, nível Y, combinação e afastamento. |
 | Custos de ações | Preservam as fórmulas upstream de tempo e gravidade para comparar movimentos e rotas. |
 | Estado e regras do mundo | Fornecidos por `NpcPathfinder`, no servidor, sem assumir um jogador cliente conectado. |
-| Movimentação | O adaptador calcula rotas de caminhada, diagonais, subida, descida e água; os movimentos continuam físicos e são revalidados. |
-| Mineração e colocação | Permanecem nos executores do AI Player, com verificações de inventário, ferramentas, propriedade e regras do mundo. A busca de rotas não quebra nem coloca blocos por conta própria. |
+| Movimentação | `NpcNavigation` coordena caminhada, diagonais, saltos com arco validado, escadas existentes, natação, saídas da água, quedas limitadas, pontes e pilares pagos. `PreparedRoute` revalida ações, custos e progresso. |
+| Mineração e colocação | O grafo compara caminhos comuns com passagens preparadas; o executor abre passagem e coloca apoios usando ferramentas e inventário reais. A coleta mantém a escada de retorno, trata gravidade/água e recolhe os drops fisicamente. |
 | Fabricação e troca de ferramentas | Continuam nos executores do AI Player; o planejador não materializa recursos. |
 | Abrigo, plantio e exploração | Implementados em `CompanionTasks`, que solicita rotas e executa ações físicas com recursos reais. São controladores do NPC, distintos dos processos do jogador cliente Baritone. |
 | Mixins, comandos e renderização do cliente Baritone | Não são incorporados ao runtime do NPC. |
@@ -55,7 +55,7 @@ Essa matriz distingue a funcionalidade adaptada de uma portabilidade integral
 de todos os arquivos e processos do cliente Baritone. Copiar classes de
 cliente sem um executor de NPC não tornaria essas capacidades funcionais.
 
-O planejador atual considera terreno carregado e rotas locais limitadas. A
+O planejador considera segmentos de terreno carregado. Tickets móveis do próprio NPC carregam a região seguinte e mantêm entidades e fornalhas ativas durante viagens. Não há raio total ligado à posição do dono para as ordens de busca. A
 configuração do adaptador limita a busca a 4.096 nós por chamada e 48 blocos
 de deslocamento por eixo, com orçamento agregado por NPC a cada tick. Um
 resultado parcial não é tratado como chegada ao destino. Não há importação
@@ -63,81 +63,85 @@ de esquemas arbitrários, cache completo do mundo do cliente, comando
 `#mine`/`#goto`, mineração genérica de todos os minérios ou voo de Elytra
 nessa adaptação.
 
-## Ordens e uso no jogo
+## Ordens por diálogo
 
-Os comandos atuam no NPC mais próximo pertencente ao jogador, a até 48
-blocos. As frases de chat são interpretadas pelo parser local do AI Player;
-não dependem de API de IA ou serviço remoto.
+As novas tarefas usam o chat normal com sinônimos e pequenos erros de escrita.
+As conversas de confirmação pertencem ao dono e ao NPC, expiram e conservam a
+dimensão e a posição da ordem original. Uma proposta não interrompe o trabalho
+anterior até ser confirmada. “Não” descarta a proposta; “pare a tarefa” cancela
+o trabalho atual.
 
-| Comando | Exemplo de chat | Comportamento |
-| --- | --- | --- |
-| `/aiplayer construir abrigo` | `construa um abrigo` | Inicia o plano fixo de abrigo de madeira 5×5. |
-| `/aiplayer plantar` | `plante trigo` | Procura solos elegíveis próximos e mantém o ciclo de trigo. |
-| `/aiplayer explorar` | `explore a área` | Visita até oito destinos locais seguros em terreno já carregado. |
-| `/aiplayer cancelar` | `cancele o projeto` | Cancela o projeto e a coleta atual. |
-| `/aiplayer status` | — | Mostra atividade, necessidade de recursos e progresso do projeto. |
+| Frase | Resultado |
+| --- | --- |
+| “Construa uma casa” | Pergunta o modelo disponível e confirma a obra. |
+| “Faça um abrigo de pinheiro” | Confirma o abrigo com paleta fixa de spruce. |
+| “Crie uma plantação” | Confirma a construção de um canteiro irrigado. |
+| “Cuide da plantação” | Confirma cuidado contínuo das plantações existentes até 100 blocos da origem. |
+| “Plante trigo” | Pergunta se deve criar ou cuidar de uma plantação. |
+| “Ache comida” | Prioriza animais adequados na busca de alimento. |
+| “Me siga” | Cancela o trabalho e volta a seguir o dono. |
+| “O que você está fazendo?” | Informa o status e os materiais pendentes. |
 
-### Abrigo
+### Abrigo detalhado
 
-O plano possui 80 posições de tábuas: piso 5×5, perímetro com duas camadas
-de parede, vão de entrada com duas alturas e teto 5×5. O vão é uma abertura,
-não um bloco de porta. Cada bloco colocado consome uma tábua real; posições
-já concluídas e reconhecidas como próprias são preservadas ao retomar.
-A execução monta o piso, os quatro apoios de canto e o teto antes de
-fechar as paredes; o NPC trabalha de dentro do abrigo para manter acesso.
-O teto começa pelos quatro cantos e avança da borda para o centro para
-preservar a linha de visão.
-Ao chegar, o NPC pode ajustar fisicamente sua posição dentro da mesma
-célula validada; alcance, colisão e visibilidade reais continuam obrigatórios.
+O novo modelo tem piso de 5×7, paleta de madeira escolhida uma vez e persistida,
+cinco janelas de vidro, porta real de duas metades, telhado inclinado com escadas
+e lajes, bancada e fornalha internas. Prepara neve, vegetação e terreno natural
+com levantamento das colunas, escolha da altura, quebras físicas de cima para baixo e fundações pagas até o apoio natural, sem o antigo limite fixo de quatro blocos. Construções marcadas
+como protegidas, blocos de outros NPCs e inventários são preservados.
 
-O local começa próximo ao NPC e exige terreno carregado, apoio para os
-blocos, espaço livre e posições de trabalho alcançáveis. Blocos existentes
-que não pertencem ao plano são preservados; o status informa o impedimento
-em vez de limpar a área automaticamente. Com fabricação automática, o NPC
-pode converter troncos em tábuas e solicitar coleta de madeira que falta.
-Sem ela, entregue as tábuas necessárias.
+O executor mantém alcance, linha de visão, apoio e colisão reais. Blocos colocados
+consomem itens. A ordem de telhado e paredes conserva as posições de trabalho;
+a porta própria pode ser aberta durante navegação e fechada após passagem, sem
+fechar sobre outra entidade. Portas de ferro e portas de outros proprietários
+não recebem essa permissão.
 
-### Plantio
+### Materiais e fabricação
 
-Entregue **sementes reais de trigo** e forneça uma enxada utilizável ou
-materiais para fabricá-la. Com fabricação automática, o mesmo executor de
-receitas do AI Player pode produzir uma enxada com bancada, gravetos e
-materiais reais; pode buscar madeira quando necessário. As sementes não
-são fabricadas nem geradas pela tarefa.
+ProjectMaterials resolve receitas de componentes de madeira, ferramentas,
+bancada, fornalha e balde usando o inventário real. Receitas que exigem bancada
+usam uma bancada acessível. Ferro, vidro e carvão vegetal são processados por
+uma fornalha vanilla colocada no mundo; combustível e tempo de cozimento são
+reais. Mineração produz drops no bloco e exige aproximação para recolher.
 
-O controlador escolhe até nove solos próximos de água, prepara terra ou
-grama naturais, planta consumindo uma semente e colhe apenas trigo maduro
-sob sua responsabilidade. A água precisa existir a até quatro blocos nos
-eixos horizontais, na altura do solo ou logo acima. O projeto não coloca
-água, acelera crescimento ou toma uma plantação de outro proprietário.
+A busca observa recursos e entradas de cavernas e pode abrir escadas e galerias para expor pedra, carvão e ferro ocultos. `MaterialExcavation` integra esse acesso às dependências dos projetos e às ordens diretas de pedra. `SafeExcavation` preserva pisos e altura de passagem, usa ferramentas reais e revalida líquidos, construções e atores a cada passo. As entradas abertas na superfície ficam registradas em `SurfaceRestoration`; depois de sair, o NPC coloca terra real apenas nessa camada, preservando o túnel. Cancelamento e NBT mantêm essa obrigação, e os chunks permanecem ativos durante o retorno.
 
-Depois de colher, os drops de trigo e sementes permanecem no mundo e são
-recolhidos fisicamente antes do replantio. A coleta automática precisa estar
-ativa e a mochila precisa ter espaço. O ciclo continua até ser cancelado;
-sem sementes, solo irrigado ou ferramenta, o status descreve o que falta.
+`PreparedRoute` usa o A* incorporado para comparar caminhada, corte de terreno natural e colocação de apoios. O executor confirma alcance, material, durabilidade, colisão e estado atual antes de modificar cada bloco; busca terra próxima quando faltam apoios. A busca usa segmentos locais com orçamento de nós e continua conforme os chunks do NPC avançam. Isso não promete a rota global ótima em terreno desconhecido nem revela minérios através de blocos. Escavações sem recurso ou com perigo mudam a busca para outro trecho, sem perfurar um poço vertical.
 
-### Exploração
+Quando um
+recurso ou rota não está acessível, mantém a necessidade no status. Não cria
+sementes, materiais, água ou ferramentas para completar uma tarefa.
 
-O percurso usa oito deslocamentos locais em torno do ponto inicial:
-cardeais de oito blocos e diagonais de seis por seis. O destino pode
-procurar piso até três blocos acima ou abaixo. Isso é uma exploração local,
-não uma varredura ilimitada do mapa nem um raio euclidiano estrito de oito
-blocos.
+### Criar e cuidar de plantações
 
-Destinos descarregados, inseguros ou sem rota válida são pulados. O contador
-informa quantos locais foram realmente visitados, que pode ser menor que
-oito. Em cada visita, o NPC registra recursos próximos observáveis, como
-árvores, pedra e trigo. O controlador não força carregamento de chunks nem
-trata uma rota apenas calculada como uma visita concluída.
+Criar usa um layout 7×7 com borda de troncos, 22 posições de solo e três fontes
+no canal. Prepara o terreno, obtém os materiais, fabrica um balde se necessário,
+busca água fisicamente e reutiliza o mesmo balde nas viagens. Depois prepara os
+canteiros com enxada real e planta as sementes disponíveis. Ao terminar libera
+o NPC para voltar a seguir o dono; falta de sementes não gera itens gratuitos.
 
-### Interrupções e persistência
+Cuidar reconhece terra arada manualmente e plantações existentes de trigo,
+cenoura, batata e beterraba em um raio horizontal inclusivo de 100 blocos da
+posição da ordem. A confirmação autoriza apenas o trabalho agrícola nessa área,
+preservando reivindicações de outros NPCs e os demais blocos protegidos. Colhe
+apenas plantas maduras, recolhe os drops fisicamente e replanta com sementes ou
+produtos reais do tipo correspondente. O cuidado continua até ser cancelado.
 
-Inventário aberto, alimentação e combate podem pausar o projeto. O estado
-do projeto e as posições já trabalhadas são salvos; rotas transitórias são
-recalculadas. Uma mudança de dimensão cancela o projeto, e um projeto
-restaurado muito longe do NPC não é retomado automaticamente. As ordens
-anteriores de madeira, pedra e comida continuam disponíveis; uma nova ordem
-substitui o projeto em andamento.
+O scanner percorre colunas gradualmente, somente em chunks carregados. Rotas
+maiores são divididas em trechos que continuam obedecendo às regras de segurança
+do planejador; calcular um trecho não é contado como chegada ao destino final.
+
+### Autonomia e compatibilidade
+
+A observação de recursos e caminhadas curtas próximas do dono passam a integrar
+a autonomia. Não existe uma nova ordem explícita de explorar. Combate, refeições,
+inventário aberto e cancelamentos continuam interrompendo os projetos de forma
+controlada. Progresso, origem e paleta são persistidos por dimensão.
+
+As tarefas salvas da versão 0.5.x (abrigo de 80 tábuas, FARM e EXPLORE) continuam
+legíveis para completar trabalhos antigos. Novos diálogos iniciam os executores
+novos; os comandos antigos de construir, plantar e explorar foram removidos da
+interface pública.
 
 ## Regras preservadas
 
@@ -213,15 +217,20 @@ conserva seus próprios direitos. O estado específico de compilação e
 GameTests de cada revisão deve ser consultado no workflow correspondente;
 este documento não declara testes executados sem o respectivo resultado.
 
-## Cobertura de regressão desta integração
+## Cobertura e critérios de entrega da 0.7.0
 
-A suíte contém 104 GameTests: os 79 originais, quatro regressões de
-ferramentas e mineração e 21 cenários de navegação e projetos. O teste de
-borda do piso verifica uma rota física sem teletransporte. O cenário de
-item submerso zera apenas o impulso lateral aleatório da montagem do teste,
-preservando gravidade, flutuação, tempo limite e verificações originais.
-O plantio com fabricação automática também verifica que uma única enxada
-real é produzida e utilizada, sem repetir a receita após sua conclusão.
-A retomada de um teto parcial salvo na posição fracionária da regressão
-verifica a conclusão com 48 blocos existentes e 32 tábuas restantes.
-Os resultados de execução pertencem à revisão identificada no Actions.
+A suíte contém 378 nomes distintos: 185 preservados e 193 novos. A ampliação cobre 47 cenários de movimento, 30 de árvores/FallingTree, 33 de pedreiras e restauração, 30 de terreno/construção, 28 de lotes/receitas e 25 de memória/viagens. Os grupos críticos são repetidos nas sementes 17, 104729 e 8675309, em mundos isolados.
+
+`tools/verify_gametest_suite.py` verifica os nomes exatos, ausência de omissões/falhas, todas as sementes e uma única revisão de fontes. A execução completa e os testes de produção Fabric 0.15.11 e 0.20.0 são necessários para gerar o pacote `VALIDADO`. Consulte o relatório da revisão; a existência dos testes no código não declara que uma execução passou.
+
+## Adaptações adicionais do executor
+
+Os fontes de referência de PathExecutor, PathingBehavior, MovementParkour, MovementPillar, MovementHelper, CalculationContext, WorldScanner e MineProcess estão preservados em `embedded-baritone/upstream`. A correspondência com os controladores do NPC está em `embedded-baritone/UPSTREAM.md`.
+
+O índice de recursos varre seções residentes com orçamento compartilhado de 1.024 células por tick, mantém posições e regiões visitadas por dimensão e revalida blocos antes de interagir. O deslocamento em segmentos usa os tickets móveis já existentes; não há limite de viagem atrelado ao jogador. O índice não carrega remotamente todos os chunks do mundo.
+
+Lotes distinguem mínimo para a próxima ação, quantidade planejada e entrega. Uma dependência antiga salva conserva sua quantidade. Um lote parcial é usado quando acaba a varredura local e não há outra fonte acessível conhecida; uma obra com muitos recursos disponíveis continua coletando em lote. NBT de materiais versão 3 lê as versões anteriores; caminhos em andamento são recalculados após carregar.
+
+A interação aquática é autorizada para conter água com blocos reais e exige alcance, espaço livre, propriedade e ar suficiente. Gravidade não permite entrar sob blocos caindo. Elytra, portais/interdimensões e importação de esquemas arbitrários não fazem parte desta entrega. A validação cobre os cenários nomeados, sem prometer uma rota global ótima através de terreno desconhecido.
+
+A navegação revalida água que avança sobre trechos antes secos e transfere o controle de natação para caminhada ao alcançar apoio na margem. Ao terminar ou cancelar uma rota, libera os comandos de movimento e freia o deslocamento horizontal. Drops apoiados na borda de uma coluna de areia aguardam o corte seguro dos blocos restantes antes da coleta física.

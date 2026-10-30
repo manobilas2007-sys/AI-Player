@@ -20,6 +20,10 @@ public final class CompanionIntelligence {
     private final BrainMemory memory=new BrainMemory();
     private final NavigationMonitor navigation;
     private final TerrainRecovery recovery;
+    private final SurfaceRestoration restoration;
+    private int recoveryTick=-1;
+    private boolean recoveryResult;
+    private final AutonomousSurvey survey;
     private DecisionPolicy.Activity activity=IDLE;
     private ResourcePlan plan=new ResourcePlan(0,0,false,4,false);
     private NbtCompound suspendedJob,materialJob;
@@ -33,8 +37,14 @@ public final class CompanionIntelligence {
     private final Map<UUID,Integer> unreachableEnemies=new HashMap<>();
     private boolean following, craftAvailable;
     private long lastHurt, nextEmergencyFoodAt,nextMaterialAt;
-    public CompanionIntelligence(CompanionEntity npc){this.npc=npc;navigation=new NavigationMonitor(npc);recovery=new TerrainRecovery(npc);}
+    public CompanionIntelligence(CompanionEntity npc){this.npc=npc;navigation=new NavigationMonitor(npc);recovery=new TerrainRecovery(npc);restoration=new SurfaceRestoration(npc);survey=new AutonomousSurvey(npc);}
     public BrainMemory memory(){return memory;}
+    public boolean recoverForWork(){
+        if(recoveryTick==npc.age)return recoveryResult;
+        recoveryTick=npc.age;
+        return recoveryResult=!npc.menuOpen() && !npc.isEating() && npc.getTarget()==null && recovery.tick();
+    }
+    public SurfaceRestoration restoration(){return restoration;}
     public DecisionPolicy.Activity activity(){return activity;}
     public ResourcePlan plan(){return plan;}
     public String status(){return (npc.tasks().active()?npc.tasks().status()+" | ":"")+activity+": "+memory.reason()+" | "+memory.objective()+" / "+memory.step()+" | faltam: "+plan.missingLogs()+" troncos, "+plan.missingFood()+" alimentos, "+ResourcePlan.stoneNeeded(npc)+" pedregulhos para melhorias";}
@@ -73,12 +83,20 @@ public final class CompanionIntelligence {
         memory.dimension(npc.getWorld().getRegistryKey().getValue().toString());
         if(npc.age%100==0)memory.expire(now);
         PlayerEntity owner=npc.owner();
+        if(owner!=null && !npc.menuOpen())survey.observe();
         scan(owner);
         npc.survival().tick(); // physical pickup + already-started meal; never starts movement/crafting.
         if(attackCooldown>0)attackCooldown--;
         if(npc.age>=nextPlan){plan=ResourcePlan.inspect(npc);craftAvailable=npc.autoCraft && npc.crafting().canBegin();nextPlan=npc.age+10;}
         LivingEntity target=npc.getTarget();
         boolean danger=enemy(target);
+        if(!danger && !npc.menuOpen() && !npc.isEating() && !npc.isInLava() && !npc.isOnFire()
+                && !(npc.isSubmergedInWater() && npc.getAir()<100)
+                && !(npc.autoSurvive && npc.getHealth()<=npc.getMaxHealth()*0.8f && npc.survival().hasFood())
+                && restoration.pending()){
+            activity=CLEANUP;memory.plan("Retornar do subsolo","Fechar somente a superfície com terra");
+            restoration.tick();return;
+        }
         double distance=owner==null?0:npc.squaredDistanceTo(owner);
         if(distance>225)following=true;
         else if(distance<64)following=false;
@@ -108,7 +126,7 @@ public final class CompanionIntelligence {
         // The wood pillar and staircase executors already have their own safe
         // escape plans. Generic terrain recovery must not build a competing
         // pillar in the middle of either plan.
-        if(!danger && (!wait || npc.gathering().isManual()) && !npc.menuOpen() && !npc.isEating()
+        if(!danger && !npc.tasks().advancedActive() && (!wait || npc.gathering().isManual()) && !npc.menuOpen() && !npc.isEating()
                 && !npc.gathering().onConstructedSupport() && !npc.gathering().miningStone()
                 && recovery.tick()){
             npc.gathering().pause();npc.crafting().pause();
@@ -116,7 +134,7 @@ public final class CompanionIntelligence {
             npc.speech().observe(CompanionSpeech.Event.RECOVERY);
             navigation.reset();return;
         }
-        if(danger || wait || npc.menuOpen())recovery.pause();
+        if(danger || (wait && npc.age-recoveryTick>2) || npc.menuOpen())recovery.pause();
         // An owned bench awaiting retrieval must not starve the last cobblestone
         // needed to finish a tool set. Mining is a real prerequisite for crafting.
         boolean stoneShortage=npc.autoCraft && ResourcePlan.stoneNeeded(npc)>0
@@ -205,6 +223,11 @@ public final class CompanionIntelligence {
             && (craftAvailable || (npc.gathering().kind()==ResourceGathering.Kind.STONE && npc.crafting().canBegin()))
             && (!npc.gathering().active() || (plan.toolsNeeded() && plan.missingLogs()==0)
                 || (npc.gathering().kind()==ResourceGathering.Kind.STONE && !npc.gathering().miningStone()))));
+        // The project owns new recipes, including the axe prerequisite for
+        // timber. Generic maintenance must not consume its first gathered log
+        // or its bucket iron, nor repeatedly try a bench in uncleared grass.
+        // Only finish the recipe that was already pending before the order.
+        if(npc.tasks().advancedActive() && !npc.crafting().hasPendingRecipe())craft=false;
         // FOLLOW (70) and idle WAIT (80) used to starve crafting forever,
         // including AFTER an axe had broken. Combat, escape, eating and open
         // inventory still outrank maintenance. Pillar cleanup remains ahead
@@ -341,16 +364,19 @@ public final class CompanionIntelligence {
         if(npc.squaredDistanceTo(owner)>225){follow(owner);return;}
         if(!npc.getNavigation().isIdle() || npc.age<nextStroll)return;
         nextStroll=npc.age+40+npc.getRandom().nextInt(40);
+        if(!npc.tasks().active() && !npc.gathering().active() && npc.getHealth()>=18
+                && npc.autoSurvive && survey.idleStep())return;
         Vec3d pos=NoPenaltyTargeting.find(npc,6,2);
         if(pos!=null && pos.squaredDistanceTo(owner.getPos())<225)startSafe(BlockPos.ofFloored(pos),0.95);
     }
     public void write(NbtCompound root){
-        memory.write(root);recovery.write(root);root.putLong("NextEmergencyFood",nextEmergencyFoodAt);
+        memory.write(root);recovery.write(root);restoration.write(root);root.putLong("NextEmergencyFood",nextEmergencyFoodAt);
         root.putLong("NextMaterialAttempt",nextMaterialAt);
         if(materialJob!=null)root.put("MaterialGatherJob",materialJob.copy());
         if(suspendedJob!=null)root.put("SuspendedGatherJob",suspendedJob.copy());
     }
     public void read(NbtCompound root){
+        restoration.read(root);recoveryTick=-1;recoveryResult=false;
         recovery.read(!root.contains("WorkDimension") || root.getString("WorkDimension").equals(npc.getWorld().getRegistryKey().getValue().toString())?root:new NbtCompound());
         memory.read(root);nextEmergencyFoodAt=root.getLong("NextEmergencyFood");activity=IDLE;lastTick=-1;nextPlan=0;navigation.reset();
         nextMaterialAt=root.getLong("NextMaterialAttempt");

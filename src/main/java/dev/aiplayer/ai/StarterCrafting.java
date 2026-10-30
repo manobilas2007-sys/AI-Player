@@ -32,6 +32,7 @@ public final class StarterCrafting {
     public StarterCrafting(CompanionEntity npc){this.npc=npc;this.mining=new PhysicalMining(npc);}
     public boolean hasBench(){return ownBench && benchPos!=null;}
     public boolean hasSession(){return pending!=null || reclaiming;}
+    public boolean hasPendingRecipe(){return pending!=null;}
     /** A bench recovery is optional while the next stone recipe lacks material.
      * Ownership remains recorded; mining may temporarily take priority. */
     public boolean isReclaiming(){return reclaiming && pending==null;}
@@ -53,6 +54,13 @@ public final class StarterCrafting {
      * stick or bench recipes must not interrupt a committed mining route. */
     public boolean canCraftStoneUpgradeNow(){
         if(!npc.autoCraft || npc.age<retryAt)return false;
+        // A broken table is a cleanup drop, not an available crafting station.
+        // tick() would pursue that drop before choosing any recipe. During a
+        // stone expedition this can leave the cave and cancel unfinished work;
+        // finish the collection before resuming that optional recovery instead.
+        if(isReclaiming() && (!ownBench || benchPos==null
+                || !npc.getWorld().isChunkLoaded(benchPos)
+                || !npc.getWorld().getBlockState(benchPos).isOf(Blocks.CRAFTING_TABLE)))return false;
         return tryTools(Items.COBBLESTONE,2,Items.STONE_PICKAXE,Items.STONE_AXE,Items.STONE_SWORD)!=null;
     }
     public String description(){return reclaiming?"Recuperar bancada":pending==null?"Conferir ingredientes":Registries.ITEM.getId(pending.result).toString();}
@@ -305,7 +313,8 @@ public final class StarterCrafting {
         if(!npc.getWorld().getGameRules().getBoolean(net.minecraft.world.GameRules.DO_MOB_GRIEFING)) {blockedWork();return;}
         if(!mining.reachable(benchPos)) {
             blockedWork();
-            if(npc.age%20==0)WorkNavigation.moveNear(npc,benchPos,benchPos.getY(),1);
+            // blockedWork may defer an unreachable bench and clear its position.
+            if(benchPos!=null && npc.age%20==0)WorkNavigation.moveNear(npc,benchPos,benchPos.getY(),1);
             return;
         }
         blockedTicks=0;
@@ -349,7 +358,8 @@ public final class StarterCrafting {
         }
         if(pending.bench && !mining.reachable(benchPos)) {
             blockedWork();
-            if(npc.age%20==0)WorkNavigation.moveNear(npc,benchPos,benchPos.getY(),1);
+            // blockedWork may defer an unreachable bench and clear its position.
+            if(benchPos!=null && npc.age%20==0)WorkNavigation.moveNear(npc,benchPos,benchPos.getY(),1);
             return;
         }
         npc.getNavigation().stop();
@@ -363,7 +373,10 @@ public final class StarterCrafting {
             if(!produce(pending)){pending=null;reclaiming=ownBench;retryAt=npc.age+60;return;}
             npc.intelligence().memory().succeeded("Fabricado: "+Registries.ITEM.getId(pending.result));
         }
-        Recipe next=npc.autoCraft?choose():null;
+        // A confirmed project owns the next ingredient decision. Finish the
+        // recipe already in progress, then return control without reserving
+        // its first logs or bucket iron for another optional tool recipe.
+        Recipe next=npc.autoCraft && !npc.tasks().advancedActive()?choose():null;
         if(next!=null && contains(next) && npc.backpack.canInsert(new ItemStack(next.result,next.number))
                 && (!next.bench || (benchPos!=null && npc.getWorld().getBlockState(benchPos).isOf(Blocks.CRAFTING_TABLE)))) {
             pending=next;timer=next.bench?34:12;

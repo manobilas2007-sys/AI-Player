@@ -23,3 +23,14 @@ This is a source adaptation of the listed algorithms, not the untouched client m
 ## Validation and rebuilding
 
 Run `:embedded-baritone:coreTest` from the repository build, or compile `src/main/java` and `src/test/java` with Java 17 and run `dev.aiplayer.baritone.CoreTest`. No test framework or downloaded dependencies are needed. The source JAR includes the adapter sources, this provenance document and the unchanged upstream references so the LGPL component can be rebuilt and replaced.
+
+## Server executor expansion in 0.7.0
+
+The Minecraft-aware adaptations live in `src/main/java/dev/aiplayer/ai/navigation` in the AI Player source JAR, under LGPL-3.0-or-later notices; they cannot live in the Java-only component. Unmodified source references for each newly consulted upstream component are included below `upstream/src/main/java/baritone`.
+
+- `PreparedRoute` / `NpcNavigation`: PathExecutor and PathingBehavior's single movement owner, original per-movement cost timeout, live lookahead, physical completion, failure cancellation and replanning. Server controls replace client key presses. Ordinary and modifying routes share the per-tick search budget.
+- `JumpMotion` and prepared movement actions: MovementParkour's launch/flight/landing stages, MovementPillar's jump-before-placement, and MovementHelper/CalculationContext's collision, tool, falling-block and fluid restrictions. Full body ballistic validation and server entity velocities replace player input. Unsafe gravity columns are quarried from above, or released from a verified side footprint when trapped.
+- `ResourceIndex`: WorldScanner's resident section/palette scan and MineProcess's retained resource candidates, revalidation and cost ordering. Scans are incremental, with a shared 1024-cell tick budget, bounded coordinate/frontier storage, dimension-tagged NBT and physical travel before interaction. Dense stone is sampled; sparse ore and exposed faces are indexed.
+- House, farm and recipe orchestration use AI Player's existing server tasks; their batches, pickup and return obligations are AI Player code. These are not claimed as an unchanged port of Baritone's client processes.
+
+Reference files excluded from compilation are evidence for review, not extra runtime classes. Elytra and portal/interdimension travel are outside the agreed 0.7.0 task set. Tests establish the covered scenarios, not a guarantee of an optimal global route through an unseen world.

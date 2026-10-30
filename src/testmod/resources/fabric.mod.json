@@ -12,11 +12,34 @@
       "dev.aiplayer.test.ExcavationTests",
       "dev.aiplayer.test.FallingTreeTests",
       "dev.aiplayer.test.BaritoneNavigationTests",
-      "dev.aiplayer.test.CompanionTaskTests"
+      "dev.aiplayer.test.CompanionTaskTests",
+      "dev.aiplayer.test.FarmProjectTests",
+      "dev.aiplayer.test.FoodAutonomyTests",
+      "dev.aiplayer.test.HouseProjectTests",
+      "dev.aiplayer.test.OwnedDoorNavigationTests",
+      "dev.aiplayer.test.ProjectMaterialsTests",
+      "dev.aiplayer.test.ProjectWorkTests",
+      "dev.aiplayer.test.ProjectBootstrapTests",
+      "dev.aiplayer.test.ProjectArbitrationTests",
+      "dev.aiplayer.test.RemoteProjectTests",
+      "dev.aiplayer.test.CompanionChunkLoadingTests",
+      "dev.aiplayer.test.LongRangeResourceTests",
+      "dev.aiplayer.test.HouseNaturalTerrainTests",
+      "dev.aiplayer.test.ManualResourceSurveyTests",
+      "dev.aiplayer.test.ResourceAccessTests",
+      "dev.aiplayer.test.TreeProjectRegressionTests",
+      "dev.aiplayer.test.MovementExecutionTests",
+      "dev.aiplayer.test.MaterialBatchRegressionTests",
+      "dev.aiplayer.test.ResourceMemoryJourneyTests",
+      "dev.aiplayer.test.TerrainConstructionRegressionTests",
+      "dev.aiplayer.test.QuarryExcavationRegressionTests"
     ]
   },
   "depends": {
     "aiplayer": "*",
     "fabric-gametest-api-v1": "*"
-  }
+  },
+  "mixins": [
+    "aiplayer-test.mixins.json"
+  ]
 }

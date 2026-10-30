@@ -91,7 +91,25 @@ public class SurfaceMiningTests implements FabricGameTest {
         Item[] items={Items.OAK_LOG,Items.OAK_PLANKS,Items.STICK,Items.CRAFTING_TABLE,Items.WOODEN_PICKAXE,Items.WOODEN_AXE,Items.WOODEN_SWORD};int[] counts={4,8,8,1,1,1,1};
         for(int i=0;i<items.length;i++)a.backpack.setStack(i,new ItemStack(items[i],counts[i]));
         for(int z=0;z<8;z++)c.setBlockState(new BlockPos(5,2,z),Blocks.STONE);
-        c.runAtTick(1400,()->{c.assertTrue(owns(a,Items.STONE_PICKAXE)&&owns(a,Items.STONE_AXE)&&owns(a,Items.STONE_SWORD),"Autonomous upgrade failed"+debug(a)+" "+a.crafting().diagnostics());c.assertTrue(ResourcePlan.stoneNeeded(a)==0 && a.backpack.count(Items.COBBLESTONE)==0,"Wrong material accounting");owner.discard();c.complete();});
+        StringBuilder trace=new StringBuilder();
+        String[] previous={""};
+        c.runAtEveryTick(()->{
+            String state=a.gathering().kind()+":"+a.gathering().progress()+"/"+a.gathering().goal()
+                +":"+a.gathering().canStartAutomatic()+":"+a.intelligence().activity()+":"+ResourcePlan.stoneNeeded(a)
+                +":"+(a.owner()!=null)+":"+SurfaceStoneGathering.caveAccess(a,a.getBlockPos())
+                +":"+a.crafting().description();
+            if(!state.equals(previous[0])){
+                previous[0]=state;
+                trace.append("\n age=").append(a.age).append(" ").append(state)
+                    .append(" pos=").append(a.getPos()).append(" ownerPos=")
+                    .append(a.owner()==null?"missing":a.owner().getPos()).append(" remainingStone=")
+                    .append(java.util.stream.IntStream.range(0,8).filter(z->c.getWorld().getBlockState(
+                        c.getAbsolutePos(new BlockPos(5,2,z))).isOf(Blocks.STONE)).count())
+                    .append(" ").append(a.crafting().diagnostics())
+                    .append(" ").append(a.gathering().stoneDiagnostics(c.getAbsolutePos(new BlockPos(5,2,4))));
+            }
+        });
+        c.runAtTick(1400,()->{c.assertTrue(owns(a,Items.STONE_PICKAXE)&&owns(a,Items.STONE_AXE)&&owns(a,Items.STONE_SWORD),"Autonomous upgrade failed"+debug(a)+" "+a.crafting().diagnostics()+trace);c.assertTrue(ResourcePlan.stoneNeeded(a)==0 && a.backpack.count(Items.COBBLESTONE)==0,"Wrong material accounting");owner.discard();c.complete();});
     }
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="surface",tickLimit=1200)
     public void ownedBenchRecoveryYieldsToMissingCobblestone(TestContext c){
@@ -123,6 +141,42 @@ public class SurfaceMiningTests implements FabricGameTest {
             c.assertTrue(ResourcePlan.stoneNeeded(a)==0,
                 "Autonomous stone dependency still unmet"+debug(a));
             owner.discard();c.complete();
+        });
+    }
+    @GameTest(templateName="aiplayer_test:surface_arena",batchId="surface",tickLimit=1100)
+    public void brokenBenchDropCannotInterruptStoneExpedition(TestContext c){
+        CompanionEntity a=worker(c);a.autoCraft=true;a.setMode(Mode.GUARD);
+        // The next upgrade is affordable, but the old station has already
+        // become a real drop outside the covered work area. A cleanup detour
+        // must not replace the still-active expedition with a crafting turn.
+        Item[] items={Items.WOODEN_PICKAXE,Items.WOODEN_AXE,Items.STONE_SWORD,
+            Items.COBBLESTONE,Items.OAK_PLANKS,Items.STICK};
+        int[] counts={1,1,1,3,8,6};
+        for(int i=0;i<items.length;i++)a.backpack.setStack(i,new ItemStack(items[i],counts[i]));
+        BlockPos bench=c.getAbsolutePos(new BlockPos(3,2,0));
+        NbtCompound owned=new NbtCompound();owned.putLong("OwnedBench",bench.asLong());
+        a.crafting().readNbt(owned);
+        ItemEntity drop=new ItemEntity(c.getWorld(),bench.getX()+0.5,bench.getY()-2,bench.getZ()-1.5,
+            new ItemStack(Items.CRAFTING_TABLE));
+        drop.setToDefaultPickupDelay();drop.addCommandTag("aiplayer_drop_"+a.getUuid());
+        c.getWorld().spawnEntity(drop);
+        for(int z=2;z<=4;z++)c.setBlockState(new BlockPos(5,2,z),Blocks.STONE);
+        a.gathering().start(ResourceGathering.Kind.STONE,3,false);
+        boolean[] finished={false};
+        c.runAtEveryTick(()->{
+            if(a.gathering().active()){
+                c.assertTrue(SurfaceStoneGathering.caveAccess(a,a.getBlockPos()),
+                    "Bench cleanup pulled an unfinished expedition outside the cave"+debug(a));
+                c.assertTrue(a.intelligence().activity()!=dev.aiplayer.ai.brain.DecisionPolicy.Activity.CRAFT,
+                    "A broken bench drop was treated as a ready crafting station"+debug(a));
+            } else if(a.gathering().progress()==3)finished[0]=true;
+        });
+        c.runAtTick(1000,()->{
+            c.assertTrue(finished[0],"Stone collection was cancelled to recover its broken bench"+debug(a));
+            c.assertTrue(owns(a,Items.STONE_PICKAXE) && owns(a,Items.STONE_AXE),
+                "Deferred bench recovery lost the real station or the upgrade ingredients"+debug(a)
+                    +" "+a.crafting().diagnostics());
+            c.complete();
         });
     }
     @GameTest(templateName="aiplayer_test:surface_arena",batchId="surface",tickLimit=500)
@@ -269,7 +323,7 @@ public class SurfaceMiningTests implements FabricGameTest {
         BlockPos stone=new BlockPos(4,2,2);c.setBlockState(stone,Blocks.STONE);
         a.gathering().start(ResourceGathering.Kind.STONE,1,true);
         c.runAtTick(40,()->{
-            c.assertFalse(a.gathering().active(),"Outdoor order was retained");
+            c.assertTrue(a.gathering().active(),"Outdoor manual order was discarded instead of looking for a cave");
             c.assertTrue(c.getWorld().getBlockState(c.getAbsolutePos(stone)).isOf(Blocks.STONE),"Outdoor stone was mined");
             c.assertTrue(a.getMainHandStack().getDamage()==0,"Pick was used outdoors");
             c.assertTrue(a.backpack.count(Items.COBBLESTONE)==0,"Invented outdoor resource");
